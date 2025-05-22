@@ -9,13 +9,26 @@ clear
 cd "C:\users\suhishan\Documents\Final Sem Research\Conflict"
 use "NLFS 1\individual_merged.dta"
 
+numlabel, add //adds values to labels for all data.
+
+*NLFS year*
+gen nlfs_year = 1998
+
 /* Renaming some important variables */
 rename q01 sex
 rename q02 age
 rename tothhmem hhsize
 rename q04 marital_status
+rename ethnicty ethnicity
 recode sex (2=0) // 1 is male and 0 is female.
 
+gen religion_recode = religion
+label define religion_lbl 1 "Hindu" 2 "Buddhist" 3 "Islam" 4 "Christian" 5 "Others"
+label values religion_recode religion_lbl
+
+*Ethnicity Labels*
+label define ethnicity_lbl 1 "Chhetri" 2 "Brahmin" 3 "Magar" 4 "Tharu" 5 "Newar" 6 "Tamang" 7 "Kami" 8 " Yadav" 9 "Muslim" 10 "Rai" 11 "Gurung" 12 "Damai" 13 "Limbu" 14 "Sarki" 15 "Others"
+label values ethnicity ethnicity_lbl
 
 drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions.
 
@@ -100,6 +113,14 @@ histogram hhsize
 gen married = (marital_status == 2)
 summarize married if age > 10 // (marital status questions are asked to peopled aged above 10)
 
+
+
+
+/*-------------------------------------------*
+Some Descriptive Statistics
+*---------------------------------------------*/
+tabstat currently_active, by(district) stat(mean)
+
 /*------------------------------------------------------------*
 NLFS 2 Descriptive Statistics
 *--------------------------------------------------------------*/
@@ -115,6 +136,38 @@ rename q10 age
 rename totmemb hhsize
 rename q13 marital_status
 recode sex (2=0) // 1 is male and 2 is female
+
+* Matching ethnicity with NLFS 1*
+gen religion_recode = religion
+replace religion_recode = 9 if inlist(religion_recode,4, 6, 7, 8, 9)
+replace religion_recode = 4 if religion_recode == 5
+replace religion_recode = 5 if religion_recode == 9
+
+label define religion_lbl 1 "Hindu" 2 "Buddhist" 3 "Islam" 4 "Christian" 5 "Others"
+label values religion_recode religion_lbl
+
+*Matching Ethnicity with NLFS 1*
+gen ethnicity = .
+replace ethnicity = 1 if q11 == 1
+replace ethnicity = 2 if q11 == 2
+replace ethnicity = 3 if q11 == 3
+replace ethnicity = 4 if q11 == 4
+replace ethnicity = 5 if q11 == 6
+replace ethnicity = 6 if q11 == 5
+replace ethnicity = 9 if q11 == 7
+replace ethnicity = 7 if q11 == 8
+replace ethnicity = 8 if q11 == 9
+replace ethnicity = 10 if q11 == 10
+replace ethnicity = 11 if q11 == 11
+replace ethnicity = 12 if q11 == 12
+replace ethnicity = 13 if q11 == 13
+replace ethnicity = 14 if q11 == 15
+replace ethnicity = 15 if q11 == 14 | inrange(q11, 16, 103)
+
+label define ethnicity_lbl 1 "Chhetri" 2 "Brahmin" 3 "Magar" 4 "Tharu" 5 "Newar" 6 "Tamang" 7 "Kami" 8 " Yadav" 9 "Muslim" 10 "Rai" 11 "Gurung" 12 "Damai" 13 "Limbu" 14 "Sarki" 15 "Others"
+label values ethnicity ethnicity_lbl
+
+
 
 drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions.
 
