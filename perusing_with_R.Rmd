@@ -1,0 +1,204 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+This is initially looking at grouping of conflict incidences pre and post 1999
+
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(geodata)
+library(sf)
+library(patchwork)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+options(scipen = 999)
+
+
+conflict <- read_dta("Conflict Data/conflict.dta") %>% 
+  filter(year>1995 & year <2007) %>% 
+  mutate(district = adm_2)
+
+
+# See proportion of deaths before 1998 w.r.t to total deaths. 
+pre99 <- conflict %>% group_by(district) %>% 
+  filter(year<1999) %>% 
+  summarize(deaths_pre99 =  sum(best_est) )
+
+pre07 <- conflict %>% group_by(district) %>% 
+  filter(year>1998 & year<2007) %>% 
+  summarize(deaths_pre07 =  sum(best_est))
+
+total <- merge(pre99, pre07, by= "district", all.y = TRUE) %>% 
+  mutate(
+    deaths_pre99 = ifelse(is.na(deaths_pre99), 0, deaths_pre99),
+    prop_pre99 = round(deaths_pre99/deaths_pre07, 2)
+  )
+
+total %>% 
+  ggplot(aes(x = prop_pre99, y = deaths_pre07))+
+  geom_point(color = "navyblue", shape = 1)
+
+summary(lm(deaths_pre07 ~ deaths_pre99, data = total))
+```
+
+
+On classification into treatment and control:
+There are a lot of misspecification tests that one must conduct but I will do that later. 
+
+```{r}
+c <- read_dta("Conflict Data/conflict_collapsed.dta")
+
+c <- c  %>% 
+  mutate(forest_cover = round(norm_forest * 100, 3),
+         poverty_rate = round(pov_rate * 100, 3),
+         high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),
+                              1, 0))
+
+#First Stage Plot of Conflict Deaths and forest cover.
+
+
+m1 <- lm(best_est ~ forest_cover, c)
+m2 <- lm(best_est ~ forest_cover + elevation_max, c)
+m3 <- lm(best_est ~ high_forest + propdeaths_pre02 + elevation_max, c)
+
+
+stargazer(m1, m2, type = "text")
+stargazer(m3, type = "latex", star.cutoffs = NA, 
+          out = "Data Presentation/first_stage_reg.tex")
+stargazer(m3, type = "text")
+
+```
+
+First Stage Plot of Forest Cover and Conflict Deaths.
+
+```{r}
+firststage_plot <- c %>% 
+  ggplot(aes(x = forest_cover, y = best_est))+
+  geom_point(color = "#C70039", size =2.5)+
+  geom_smooth(method = "lm", se = T,
+              color = "black",
+              size = 0.5)+
+  xlab("Forest Cover Percentage in 1994")+
+  ylab("Total Conflict Deaths")+
+  labs(
+    title = "Forest Cover as instrument for Conflict Deaths",
+    subtitle = "Conflict Deaths here is Total Conflict Deaths from 1996 to 2006"
+  )
+
+ggsave("firststage.jpg", plot = firststage_plot, path = "Data Presentation",
+       bg = "white", width = 20, height = 10, units = "cm")
+
+
+```
+
+
+Counting districts higher/lower than 75th percentile forest cover.
+
+```{r}
+c %>% 
+  filter(forest_cover > quantile(forest_cover, 0.65, na.rm =T)) %>% 
+  select(distname, incidents, best_est) %>% 
+  ggplot(aes(x = best_est))+
+  geom_histogram(bins = 30)+
+  theme_minimal()
+
+
+c %>% 
+  filter(forest_cover <  quantile(forest_cover, 0.65, na.rm =T)) %>% 
+  select(distname, incidents, best_est) %>% 
+  ggplot(aes(x = best_est))+
+  geom_histogram(bins = 30)+
+  theme_minimal()
+
+c %>% 
+  mutate(index = 1:n(),
+         treatment = ifelse(
+           forest_cover > quantile(forest_cover, 0.75, na.rm = T), 
+           1, 
+           0
+         ) ) %>% 
+  ggplot(aes(x = index, y = incidents))+
+  geom_point(aes(color = as.factor(treatment)))
+  
+
+```
+
+
+Let's make a map with conflict deaths.
+
+```{r}
+districts <- st_read("Nepal Shapfiles GADM/gadm36_NPL_3.shp")
+districts <- districts %>% 
+  mutate(NAME_3 = tolower(NAME_3))
+c <- c %>% filter(distname != "") %>% 
+  mutate(distname = tolower(distname))
+
+
+districts_joined <- left_join(
+  districts, c, by = c("NAME_3" = "distname")
+)
+
+
+
+
+```
+
+Constructing and Plotting Conflict Deaths
+```{r}
+p1 <- ggplot(districts_joined) +
+  geom_sf(aes(fill = log1p(best_est)), color = "white", size = 0.2) +
+  scale_fill_gradient(
+    low = "#ffe6f6",
+    high = "#990000",
+    na.value = "grey90",
+    name = "Deaths",
+    breaks = log1p(c(0, 50, 100, 200, 400, 800)),
+    labels = c(0, 50, 100, 200, 400, 800)
+  ) +
+  labs(
+    title = "Total Conflict Deaths by District (Maoist Insurgency, Nepal)",
+    subtitle = "Circa 1996-2006",
+    caption = "Data source: Uppsala Conflict Data Program",
+    fill = "Conflict Deaths"
+  ) +
+  theme_minimal()
+
+ggsave("conflict_map.jpg", plot = p1, path = "Data Presentation", bg = "white",
+       width = 15, height = 10, units = "cm")
+```
+
+
+Constructing and Plotting Forest Level.
+
+```{r}
+p2 <- ggplot(districts_joined) +
+  geom_sf(aes(fill = forest_cover), color = "white", size = 0.2) +
+  scale_fill_gradient(
+    low = "#bcb88a",
+    high = "#013220",
+    na.value = "grey90",
+    name = "Forest Cover (%)"
+  ) +
+  labs(
+    title = "Percentage of District covered by Forest (1994)",
+    caption = "Forest Resources of Nepal(1987-1998)",
+    fill = "Forest Cover"
+  ) +
+  theme_minimal()
+ggsave("forest_map.jpg", plot = p1, path = "Data Presentation", bg = "white",
+       width = 15, height = 10, units = "cm")
+
+
+p1 | p2
+
+ggsave("double_map.jpg", plot = p1|p2, path = "Data Presentation", bg = "white",
+       width = 30, height = 15, units = "cm")
+
+```
+
