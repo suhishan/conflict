@@ -18,6 +18,7 @@ rename q01 sex
 rename q02 age
 rename tothhmem hhsize
 rename q04 marital_status
+replace marital_status = (marital_status == 2)
 rename ethnicty ethnicity
 recode sex (2=0) // 1 is male and 0 is female.
 drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions.
@@ -52,11 +53,13 @@ gen district_abbrev = substr(district, 1, 4)
 gen religion_recode = religion
 label define religion_lbl 1 "Hindu" 2 "Buddhist" 3 "Islam" 4 "Christian" 5 "Others"
 label values religion_recode religion_lbl
+gen hindu = (religion_recode == 1)
 
 
 /*Ethnicity Labels*/
 label define ethnicity_lbl 1 "Chhetri" 2 "Brahmin" 3 "Magar" 4 "Tharu" 5 "Newar" 6 "Tamang" 7 "Kami" 8 " Yadav" 9 "Muslim" 10 "Rai" 11 "Gurung" 12 "Damai" 13 "Limbu" 14 "Sarki" 15 "Others"
 label values ethnicity ethnicity_lbl
+gen brahmin_chhetri = (ethnicity == 1 | ethnicity == 2)
 
 
 // Making descriptive statistics for NLFS 1. 
@@ -94,12 +97,17 @@ gen wage_hours = q16a
 egen selfemp_hours = rowtotal(q16b-q16i)
 
 egen work_hours = rowtotal(q16a-q16i) // work hours/q16 is 0 if all columns are missing.
+gen work_morethan_84 = (work_hours>84)
+replace work_hours = 84 if work_hours >84
 egen nonwork_hours = rowtotal(q17a-q17g) // q17 (total non work hours) has a bunch of 999 values for 0 so use `nonwork_hours`
 
 egen total_hours  = rowtotal(work_hours nonwork_hours)
+gen total_morethan_110 = (total_hours >110)
+replace total_hours = 110 if total_hours > 110
 
 // TNOTE: here are 313 people who have total hours greater than 110 and some more who have higher than 140, 150, and even 168.
 count if total_hours > 98
+
 
  
  * Currently Active (currently employed/unemployed) and currently inactive *
@@ -150,8 +158,12 @@ gen can_read = q08
 gen can_write = q09
 gen current_attend = q10 
 gen ever_attend = q11
-gen grade_completed = q12
+gen years_of_edu = q12
 
+gen edu_others = (q12 == 16)
+recode years_of_edu (16 = 99) (13 = 16) (14 15 = 18) // Bachelors means 16 years of education, Masters and Prof Degress coded as 18.
+replace years_of_edu = . if years_of_edu == 99 // Others counted as missing after storing stuff at edu_others
+gen ever_school = (q10  == 1 | q11 == 1)
 
 
 /*-------------------------------------------*
@@ -163,12 +175,12 @@ tabstat currently_active, by(district) stat(mean)
 * Keep all the necessary variables from NLFS individual_merged.dta, and save it in another file for appending with NLFS 2*
 
 #delimit ;
-keep nlfs_year sex age hhsize marital_status religion_recode ethnicity district district_abbrev 
+keep nlfs_year sex age hhsize marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
 wage_hours selfemp_hours work_hours nonwork_hours total_hours 
 currently_emp currently_unemp currently_underemp
 currently_active currently_inactive
 usually_active usually_inactive 
-can_read can_write current_attend ever_attend grade_completed
+can_read can_write current_attend ever_attend years_of_edu ever_school
 usually_emp usually_unemp ;
 #delimit cr
 
@@ -196,6 +208,7 @@ rename q09 sex
 rename q10 age
 rename totmemb hhsize
 rename q13 marital_status
+replace marital_status = (marital_status == 2)
 recode sex (2=0) // 1 is male and 2 is female
 drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions
 
@@ -207,6 +220,7 @@ replace religion_recode = 5 if religion_recode == 9
 
 label define religion_lbl 1 "Hindu" 2 "Buddhist" 3 "Islam" 4 "Christian" 5 "Others"
 label values religion_recode religion_lbl
+gen hindu = (religion_recode == 1)
 
 
 *Matching Ethnicity with NLFS 1*
@@ -229,6 +243,7 @@ replace ethnicity = 15 if q11 == 14 | inrange(q11, 16, 103)
 
 label define ethnicity_lbl 1 "Chhetri" 2 "Brahmin" 3 "Magar" 4 "Tharu" 5 "Newar" 6 "Tamang" 7 "Kami" 8 " Yadav" 9 "Muslim" 10 "Rai" 11 "Gurung" 12 "Damai" 13 "Limbu" 14 "Sarki" 15 "Others"
 label values ethnicity ethnicity_lbl
+gen brahmin_chhetri = (ethnicity == 1 | ethnicity == 2)
 
 
 *Work Hours (Wage employed and self-employed) and Non-work hours*
@@ -236,11 +251,15 @@ label values ethnicity ethnicity_lbl
 egen wage_hours = rowtotal(q36a q36b), missing // keeping missing if all values in varlist are missing. 
 egen selfemp_hours = rowtotal(q36c-q36j), missing //I want to keep missing values if all values in varlist are missing
 egen work_hours = rowtotal(wage_hours selfemp_hours), missing
+gen work_morethan_84 = (work_hours>84)
+replace work_hours = 84 if work_hours >84
 
 *NOTE: missing values, i.e. suppose people who didn't work in agricultural wage, are coded as 0.*
 
 egen nonwork_hours = rowtotal(q37a-q37g), missing
 egen total_hours = rowtotal(work_hours nonwork_hours), missing
+gen total_morethan_110 = (total_hours >110)
+replace total_hours = 110 if total_hours > 110
 
 
 * Currently Employed, Currently Unemployed and Curretly Underemployed Stats*
@@ -282,7 +301,11 @@ gen can_read = q26
 gen can_write = q27
 gen current_attend = q28 
 gen ever_attend = q29
-gen grade_completed = q30 // TODO: think about ways of recoding education to make it similar to NLFS 1.
+gen years_of_edu = q30 // TODO: think about ways of recoding education to make it similar to NLFS 1.
+
+replace years_of_edu = . if inlist(years_of_edu, 16, 17) //  Literate and Illiterate are redundant info when we have can read and can write.
+recode years_of_edu (11 = 11.5) (13 = 16) (14 15 = 18)
+gen ever_school = (q28 == 1 | q29 == 1)
 
 
 /* On Districts */
@@ -305,17 +328,18 @@ replace district = "tehrathum" if district == "terhathum"
 gen district_abbrev = lower(substr(district, 1, 4))
 replace district_abbrev = "dhak" if district == "dhankuta"
 replace district_abbrev = "sinp" if district == "sindhupalchowk"
+replace district_abbrev = "dadh" if district_abbrev == "dade"
 
 
 * Keeping only relevant variables and save in another file for ease of append.*
 
 #delimit ;
-keep nlfs_year sex age hhsize marital_status religion_recode ethnicity district district_abbrev 
+keep nlfs_year sex age hhsize marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
 wage_hours selfemp_hours work_hours nonwork_hours total_hours 
 currently_emp currently_unemp currently_underemp
 currently_active currently_inactive
 usually_active usually_inactive 
-can_read can_write current_attend ever_attend grade_completed
+can_read can_write current_attend ever_attend years_of_edu ever_school
 usually_emp usually_unemp ;
 #delimit cr
 
@@ -337,4 +361,69 @@ merge m:1 district_abbrev using "Conflict Data\conflict_collapsed.dta", keepusin
 save "appended_nlfs.dta", replace
 
 /* Now the dataset is ready for analysis */
+
+eststo clear
+
+/*
+estpost tabstat currently_emp work_hours nonwork_hours ever_school years_of_edu age treatment, c(stat) stat(mean sd min max n) nototal by(nlfs_year)
+
+#delimit ;
+esttab using "x.docx",
+ replace ///Replace file if already exists
+ cells("mean(fmt(3))" "sd(par)")  //Which Stats to Output
+ nonumber ///Do not put numbers below column titlles
+ nomtitles ///This option mainly for regression tables
+ nostar /// No Stars for Significance
+ unstack ///Vertical from Stata to Diff Columns
+ booktabs ///Top, Mid, Bottom Rule
+ noobs ///We don't need observation counts because count is N
+ title("Summary Stats by Year") ///Latex number this for us
+ collabels(none) /// Name of each column
+ eqlabels("NLFS 1998" "NLFS 2008") ///Name of Each Group
+ addnote("Note: Summary statistics by the NLFS year") ///Note below table
+ 
+;
+#delimit cr;
+*/
+ 
+ 
+ 
+ *A huge table for summary statistics*
+ 
+	 ***All People
+	eststo grp1: estpost tabstat currently_emp work_hours nonwork_hours ever_school years_of_edu age treatment, c(stat) stat(mean sd min max n) nototal by(nlfs_year)
+
+	***Adult (18-59)  Men
+	eststo grp2: estpost tabstat currently_emp work_hours nonwork_hours ever_school years_of_edu age treatment if sex == 1 & inrange(age, 18, 59), c(stat) stat(mean sd min max n) nototal by(nlfs_year)
+
+	***Adult (18-59) Women
+	eststo grp3: estpost tabstat currently_emp work_hours nonwork_hours ever_school years_of_edu age treatment if sex == 0 & inrange(age, 18, 59), c(stat) stat(mean sd min max n) nototal by(nlfs_year)
+
+
+
+
+	 #delimit ;
+	 esttab grp* using "Data Presentation/male and female summary stats.tex",
+	  replace ///Replace file if already exists
+	  cells("mean(fmt(2))" "sd(par)") ///Which Stats to Output
+	 nonumber ///Do not put numbers below column titlles
+	  mtitle("All" "Adult Men" "Adult Women") ///This option mainly for regression tables
+	  nostar /// No Stars for Significance
+	  unstack ///Vertical from Stata to Diff Columns
+	  booktabs ///Top, Mid, Bottom Rule
+	  noobs ///We don't need observation counts because count is N
+	  title("Summary Stats by Group\label{by_group}") ///Latex number this for us
+	  collabels(none) /// Name of each column
+	  addnote("Note: Summary statistics") ///Note below table
+	  coeflabels( "Employed(Last 7 days)" currently_emp "Hours Worked (Last 7 days)" currently_emp 
+  "Non Work Hours (Last 7 days)" nonwork_hours 
+  "Ever Attended School" ever_school
+  "Years of Education" years_of_edu
+  "Age" age
+  "Conflict District (Treatment)" treatment) ///Label variables right in command
+	  
+	  
+	 ;
+	 
+
 
