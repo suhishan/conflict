@@ -94,9 +94,11 @@ save "Conflict Data\conflict_collapsed.dta", replace
 
 	sum forest_cover, detail
 	scalar p75 = r(p75)
-	scalar p65  = r(p65)
-
 	gen treatment = (forest_cover > p75)
+	
+	_pctile forest_cover, p(65)
+	scalar p65 = r(r1)
+	gen treatment_65 = (forest_cover > p65)
 
 	save "Conflict Data\conflict_collapsed.dta", replace
 
@@ -104,8 +106,22 @@ save "Conflict Data\conflict_collapsed.dta", replace
 * Some descriptive Statistics*
 tabstat best_est, by(treatment) stats (mean n sd)
 
+*ttest for districts*
 
+estpost ttest pov_rate advantaged_caste lin_polar caste_polar norm_forest tot_lit_91, by(treatment)
 
-
+#delimit ;
+esttab using "Data Presentation/ttest_2.tex",
+ replace ///Replace file if already exists
+ cells("mu_1(fmt(2)) mu_2 b(star) se(par) count(fmt(0))") ///Which Stats to Output
+ star(* 0.1 * 0.05 ** 0.01) /// Can Define Custom Stars
+ nonumber ///Do not put numbers below column titlles
+ booktabs ///Top, Mid, Bottom Rule
+ noobs ///We don't need observation counts because count is N
+ title("Balance Test by Treatment") ///Latex number this for us
+ collabels("Control " "Treatment " "Difference" "Std. Error" "N") /// Name of each column
+ addnote("Note: Difference defined as Control-Treatmenet." "Source: Data from Do and Iyer (2008)" "* 0.1 ** 0.05") ///Note below table
+;
+#delimit cr;
 
 
