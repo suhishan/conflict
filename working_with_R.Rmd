@@ -34,8 +34,10 @@ c %>% View()
 censustable_1 <- read_html("CENSUSTABLE 1.htm")
 tables <- censustable_1 %>% 
   html_element("table")
+
+
 tables_df <- 
-  tables %>% html_table(fill = T) %>% 
+  tables %>% html_table(fill = T) 
   select(X1,X3) %>% 
   rename( name = X1, population = X3
   ) %>% 
@@ -51,7 +53,6 @@ tables_df <-
   ) %>% 
   mutate( district_abbrev = tolower(substr(name, 1, 4)))
 
-tables_df %>% View()
 ```
 
 
@@ -73,6 +74,33 @@ c <- c  %>%
          high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T), 1, 0))
 
 ```
+
+
+#### The above population data had no male and female so extracting data from a different source (CENSUSTABLE 3)
+
+```{r}
+censustable_3 <- read_html("2001 Census Tables/CENSUSTABLE 3.htm")
+censustable_3 <- censustable_3 %>% html_element("table") %>% 
+  html_table(fill = T)
+
+popn_df <- censustable_3 %>% 
+  select(X1:X3, X5) %>% 
+  rename(
+    Group = X1,
+    TotalPopn = X2, 
+    MalePopn = X3,
+    FemalePopn = X5
+  ) %>% 
+  mutate(rownumber = 1:n()) %>% 
+  filter(rownumber>4 & rownumber !=86)
+
+View(popn_df)
+```
+
+
+
+
+
 
 #### Now let's extract the usually employed status from TABLE 61.
 
@@ -107,14 +135,38 @@ district_info <- both_sexes_rows %>%
 
 # Left join doesn't work for male and female because male/female are not in row-2 of both sexes. Instead some random info takes place. So turn that info to NA and then fill the remaining with district names. 
 
-district_info <- district_info %>% 
+emp_info <- district_info %>% 
   arrange(row) %>% 
   mutate(
    district_name = ifelse(startsWith(district_name, "INDUSTRY"), NA, district_name)
   ) %>% 
   fill(district_name, .direction = "down") 
 
-View(district_info)
+names(emp_info) <- c("Group", "TotEmp","six_seven_months","eight_more_months", "NotStated","row","district_row","district_name")
+
+emp_info <- emp_info %>% 
+  mutate(six_seven_months = as.numeric(six_seven_months), 
+         eight_more_months = as.numeric(eight_more_months),
+         morethan_six = six_seven_months + eight_more_months) %>% 
+  select(Group, morethan_six, district_name) %>% 
+  pivot_wider(
+    names_from = Group,
+    values_from = morethan_six
+  ) %>%
+  mutate(
+    MALE = ifelse(district_name == "LAMJUNG", 30661, MALE),
+    FEMALE = ifelse(district_name == "LAMJUNG", 38096, FEMALE)
+  ) %>% 
+  mutate(
+    total_emp = as.numeric(`BOTH SEXES`),
+    male_emp = as.numeric(MALE),
+    female_emp = as.numeric(FEMALE)
+  ) %>% 
+  select(1, 5:7) %>% 
+  add_row(district_name = "TANAHUN", total_emp = 107648, male_emp = 50941,
+          female_emp = 56707) # there was some issue with tanahun data so bruteforcing entry.
+
+View(emp_info)
 ```
 
 
@@ -147,28 +199,38 @@ Let's now do the data wrangling.
 names(age_tables) <- c("AgeGroup", "Total", "TotalPct", "Male", "MalePct", "Female", "FemalePct", "Row","District")
 
 age_tables <- age_tables %>% 
-  mutate(TotalPct = as.numeric(TotalPct),
+  mutate(TotalPct = as.numeric(TotalPct), #convert chr to numeric
          MalePct = as.numeric(MalePct),
          FemalePct = as.numeric(FemalePct),
          
-         AgeGroup = str_replace_all(AgeGroup, "\\s+", " "),
+         AgeGroup = str_replace_all(AgeGroup, "\\s+", " "), #any large spaces replaced by a space for regex later on.
          ) %>%
   mutate(
-    AgeGroup = str_trim(AgeGroup),
+    AgeGroup = str_trim(AgeGroup), #trimming the front and back of string for regex later on
     District = ifelse(!is.na(TotalPct) & TotalPct == 100, AgeGroup, NA)
   ) %>% 
   fill(District, .direction = "down")
 
 under10 <- age_tables %>% 
-  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% 
+  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% #extracting under 10 years old
   mutate(TotalPct = parse_number(as.character(TotalPct)))
 
 result_age <- under10 %>% 
   group_by(District) %>% 
-  summarize(
+  summarize( #calculating cumulative percentages
     cumUnder10 = sum(TotalPct, na.rm = T),
     cumUnder10M = sum(MalePct, na.rm = T),
-    cumUnder10F = sum(FemalePct, na.rm = T))
+    cumUnder10F = sum(FemalePct, na.rm = T)) %>% 
+  mutate(
+    cumUnder10 = ifelse(District == "MYAGDI", 30.9, cumUnder10), #Myagdi bruteforced data
+    cumUnder10M = ifelse(District == "MYAGDI", 32.6, cumUnder10M),
+    cumUnder10F = ifelse(District == "MYAGDI", 29.1, cumUnder10F)
+  ) %>% 
+  add_row(District = "DHANUSA", cumUnder10 = 34.3, cumUnder10M = 34.5,
+          cumUnder10F = 34.1) %>% 
+  add_row(District = "PARBAT", cumUnder10 = 32.4, cumUnder10M = 35.2,
+          cumUnder10F = 30) 
+  
 
 print(result_age)
   
@@ -252,5 +314,71 @@ print(result_age_3)
 ```{r}
 district_under10 <- bind_rows(result_age, result_age_2, result_age_3)
 
+```
+
+
+#### The three different datasets are ready  :Overall Population, Population Under 10 years of age, Usually employed Population over 10 years.
+
+```{r}
+# three data.frames to be merged are emp_info, district_under10, popn_df
+# let all have the same name for district_column
+popn_df <- popn_df %>% rename(district_name = Group) 
+popn_df <- popn_df  %>% arrange(district_name) %>% 
+  mutate(district_id = 1:n())
+
+
+district_under10 <- district_under10 %>% rename(district_name = District) 
+district_under10 <- district_under10 %>% filter(!is.na(district_name) & !duplicated(district_name)) %>% 
+  arrange(district_name) %>% 
+  mutate(district_id = 1:n())
+
+View(district_under10)
+
+emp_info <- emp_info %>% 
+  mutate(district_name = ifelse(district_name == "MOHOTTARI", "MAHOTTARI",district_name)) %>% 
+  arrange(district_name) %>% 
+  mutate(district_id = 1:n())
+
+View(emp_info)
+
+
+a <- right_join(popn_df, district_under10, by = c("district_id"))
+
+b <- left_join(a, emp_info, by = c("district_id")) %>% select(-1, -7) %>% 
+   mutate(
+    district_name = case_when(
+      district_name == "DHANKUTA" ~ "dhak",
+      district_name == "SINDHUPALCHOK" ~ "sinp",
+      district_name == "TERHATHUM" ~ "tehr",
+      district_name == "DADELDHURA" ~ "dadh",
+      district_name == "DOLKHA" ~ "DOLAKHA",
+      district_name == "MOHOTTARI" ~ "MAHOTTARI",
+      TRUE ~ district_name
+    )
+  ) %>% 
+  mutate( district_abbrev = tolower(substr(district_name, 1, 4)))
+
+View(b)
+# b is now the working version
+
+# Let's now merge this with the conflict data. 
+c <- read_dta("Conflict Data/conflict_collapsed.dta")
+final_conflict <- left_join(c, b, by = c("district_abbrev"))
+View(final_conflict)
+
+final_conflict <- final_conflict %>% 
+  mutate(
+    TotalPopn = as.numeric(TotalPopn),
+    MalePopn = as.numeric(MalePopn),
+    FemalePopn = as.numeric(FemalePopn)
+  ) %>% 
+  mutate(popn_over_10 = (1- cumUnder10/100) * TotalPopn)
+
+
+final_conflict %>% 
+  group_by(treatment) %>% 
+  summarize(mean(total_emp/popn_over_10))
+
+write_dta(final_conflict, "final_conflict.dta")
 ```
 
