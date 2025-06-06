@@ -3,7 +3,6 @@ output: html_document
 editor_options: 
   chunk_output_type: console
 ---
-This is initially looking at grouping of conflict incidences pre and post 1999
 
 ```{r}
 setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
@@ -57,14 +56,19 @@ c <- read_dta("Conflict Data/conflict_collapsed.dta")
 c <- c  %>% 
   mutate(forest_cover = round(norm_forest * 100, 3),
          poverty_rate = round(pov_rate * 100, 3),
+         
          high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),
                               1, 0))
 
+c %>% View()
+plot(c$best_est ~ c$poverty_rate)
 #First Stage Plot of Conflict Deaths and forest cover.
 
 
 m1 <- lm(best_est ~ forest_cover, c)
-m2 <- lm(best_est ~ high_forest + elevation_max, c)
+m2 <- lm(best_est ~ high_forest + elevation_max, c); summary(m2)
+m2_1 <- lm(best_est ~ high_forest + elevation_max + propdeaths_pre02 + poverty_rate, c ); summary(m2_1)
+summary(lm(best_est ~ poverty_rate, c ))
 m3 <- lm(best_est ~ high_forest + propdeaths_pre02 + elevation_max, c)
 
 

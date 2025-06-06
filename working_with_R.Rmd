@@ -1,0 +1,256 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(geodata)
+library(sf)
+library(patchwork)
+
+#These packages are for html scraping.
+library(rvest)
+library(xml2)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+options(scipen = 999)
+
+```
+
+
+#### Adding Population of each District from Census 1991
+
+```{r}
+c <- read_dta("Conflict Data/conflict_collapsed.dta")
+c %>% View()
+
+# Reading the html file.
+censustable_1 <- read_html("CENSUSTABLE 1.htm")
+tables <- censustable_1 %>% 
+  html_element("table")
+tables_df <- 
+  tables %>% html_table(fill = T) %>% 
+  select(X1,X3) %>% 
+  rename( name = X1, population = X3
+  ) %>% 
+  mutate(
+    name = case_when(
+      name == "DHANKUTA" ~ "dhak",
+      name == "SINCHUPALCHOKE" ~ "sinp",
+      name == "TERHATHUM" ~ "tehr",
+      name == "DADELDHURA" ~ "dadh",
+      name == "DOLKHA" ~ "DOLAKHA",
+      TRUE ~ name
+    )
+  ) %>% 
+  mutate( district_abbrev = tolower(substr(name, 1, 4)))
+
+tables_df %>% View()
+```
+
+
+
+####   Merge the Population with the conflict collapsed data.
+
+```{r}
+c <- left_join(c, tables_df, by = "district_abbrev" )
+
+c <- c %>% mutate(
+  population = as.numeric(population),
+  deaths_per_1000 = (best_est/population) * 1000
+) 
+
+c <- c  %>% 
+  mutate(forest_cover = round(norm_forest * 100, 3),
+         poverty_rate = round(pov_rate * 100, 3),
+         
+         high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T), 1, 0))
+
+```
+
+#### Now let's extract the usually employed status from TABLE 61.
+
+```{r}
+emp_table <- read_html("2001 Census Tables/TABLE 61.htm")
+emp_tables <- emp_table %>% 
+  html_element("table") %>% 
+  html_table(fill = T) %>% 
+  mutate(row = row_number())
+
+```
+
+Let's filter out the needed information.
+
+```{r}
+#filtered out the needed rows
+both_sexes_rows <- emp_tables %>% filter(
+  X1 == "BOTH SEXES" | X1 == "MALE"
+   | X1 == "FEMALE"
+)
+
+
+#Extracted district/location name which is always in row-2 of "BOTH SEXES"
+# and merged them together using left join.
+
+district_info <- both_sexes_rows %>% 
+  mutate(district_row = row - 2) %>% 
+  left_join(emp_tables, by = c("district_row" = "row")) %>% 
+  select(X1.x, X2.x, X5.x, X6.x, X7.x, row, district_row, X1.y) %>% 
+  rename(district_name = X1.y)
+
+
+# Left join doesn't work for male and female because male/female are not in row-2 of both sexes. Instead some random info takes place. So turn that info to NA and then fill the remaining with district names. 
+
+district_info <- district_info %>% 
+  arrange(row) %>% 
+  mutate(
+   district_name = ifelse(startsWith(district_name, "INDUSTRY"), NA, district_name)
+  ) %>% 
+  fill(district_name, .direction = "down") 
+
+View(district_info)
+```
+
+
+Now let's extract the age info.
+
+```{r}
+age_table <- read_html("2001 Census Tables/TABLE4.2.htm")
+age_table2 <- read_html("2001 Census Tables/TABLE4.1.htm")
+age_table3 <- read_html("2001 Census Tables/TABLE 4.htm")
+age_tables  <- age_table %>% 
+  html_element("table") %>% 
+  html_table(fill = T) %>% 
+  mutate(row = row_number())
+
+age_tables2 <- age_table2 %>% 
+  html_element("table") %>% 
+  html_table(fill = T) %>% 
+  mutate(row = row_number())
+
+age_tables3  <- age_table3 %>% 
+  html_element("table") %>% 
+  html_table(fill = T) %>% 
+  mutate(row = row_number())
+
+
+```
+Let's now do the data wrangling.
+
+```{r}
+names(age_tables) <- c("AgeGroup", "Total", "TotalPct", "Male", "MalePct", "Female", "FemalePct", "Row","District")
+
+age_tables <- age_tables %>% 
+  mutate(TotalPct = as.numeric(TotalPct),
+         MalePct = as.numeric(MalePct),
+         FemalePct = as.numeric(FemalePct),
+         
+         AgeGroup = str_replace_all(AgeGroup, "\\s+", " "),
+         ) %>%
+  mutate(
+    AgeGroup = str_trim(AgeGroup),
+    District = ifelse(!is.na(TotalPct) & TotalPct == 100, AgeGroup, NA)
+  ) %>% 
+  fill(District, .direction = "down")
+
+under10 <- age_tables %>% 
+  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% 
+  mutate(TotalPct = parse_number(as.character(TotalPct)))
+
+result_age <- under10 %>% 
+  group_by(District) %>% 
+  summarize(
+    cumUnder10 = sum(TotalPct, na.rm = T),
+    cumUnder10M = sum(MalePct, na.rm = T),
+    cumUnder10F = sum(FemalePct, na.rm = T))
+
+print(result_age)
+  
+```
+
+For the remaining districts:
+
+```{r}
+names(age_tables2) <- c("AgeGroup", "Total", "TotalPct", "Male", "MalePct", "Female", "FemalePct", "Row", "District")
+
+age_tables2 <- age_tables2 %>% 
+  mutate(TotalPct = as.numeric(TotalPct),
+          MalePct = as.numeric(MalePct),
+         FemalePct = as.numeric(FemalePct),
+        
+         AgeGroup = str_replace_all(AgeGroup, "\\s+", " "),
+         ) %>%
+  mutate(
+    AgeGroup = str_trim(AgeGroup),
+    District = ifelse(!is.na(TotalPct) & TotalPct == 100, AgeGroup, NA)
+  ) %>% 
+  fill(District, .direction = "down")
+
+under10_2 <- age_tables2 %>% 
+  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% 
+  mutate(TotalPct = parse_number(as.character(TotalPct)))
+
+result_age_2 <- under10_2 %>% 
+    group_by(District) %>% 
+  summarize(
+    cumUnder10 = sum(TotalPct, na.rm = T),
+    cumUnder10M = sum(MalePct, na.rm = T),
+    cumUnder10F = sum(FemalePct, na.rm = T))
+
+
+print(result_age_2)
+
+```
+
+For Eastern Development Region : The third table. 
+
+```{r}
+names(age_tables3) <- c("AgeGroup", "Total", "TotalPct", "Male", "MalePct", "Female", "FemalePct", "Row","District")
+
+age_tables3 <- age_tables3 %>% 
+  mutate(TotalPct = as.numeric(TotalPct),
+          MalePct = as.numeric(MalePct),
+         FemalePct = as.numeric(FemalePct),
+        
+         AgeGroup = str_replace_all(AgeGroup, "\\s+", " "),
+         ) %>%
+  mutate(
+    AgeGroup = str_trim(AgeGroup),
+    District = ifelse(!is.na(TotalPct) & TotalPct == 100, AgeGroup, NA)
+  ) %>% 
+  fill(District, .direction = "down")
+
+View(age_tables3)
+
+under10_3 <- age_tables3 %>% 
+  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% 
+  mutate(TotalPct = parse_number(as.character(TotalPct)))
+
+
+
+result_age_3 <- under10_3 %>% 
+    group_by(District) %>% 
+  summarize(
+    cumUnder10 = sum(TotalPct, na.rm = T),
+    cumUnder10M = sum(MalePct, na.rm = T),
+    cumUnder10F = sum(FemalePct, na.rm = T))
+
+
+print(result_age_3)
+
+
+```
+
+#### The Overall Under 10 Population Percentage by District.
+
+```{r}
+district_under10 <- bind_rows(result_age, result_age_2, result_age_3)
+
+```
+
