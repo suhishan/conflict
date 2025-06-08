@@ -17,7 +17,9 @@ theme_set(theme_minimal() +
             theme(panel.grid = element_blank()))
 
 options(scipen = 999)
+```
 
+```{r}
 
 conflict <- read_dta("Conflict Data/conflict.dta") %>% 
   filter(year>1995 & year <2007) %>% 
@@ -57,20 +59,17 @@ c <- c  %>%
   mutate(forest_cover = round(norm_forest * 100, 3),
          poverty_rate = round(pov_rate * 100, 3),
          
-         high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),
-                              1, 0))
+         high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),1, 0))
 
-c %>% View()
-plot(c$best_est ~ c$poverty_rate)
+
 #First Stage Plot of Conflict Deaths and forest cover.
 
 
 m1 <- lm(best_est ~ forest_cover, c)
 m2 <- lm(best_est ~ high_forest + elevation_max, c); summary(m2)
 m2_1 <- lm(best_est ~ high_forest + elevation_max + propdeaths_pre02 + poverty_rate, c ); summary(m2_1)
-summary(lm(best_est ~ poverty_rate, c ))
-m3 <- lm(best_est ~ high_forest + propdeaths_pre02 + elevation_max, c)
 
+m3 <- lm(best_est ~ high_forest + propdeaths_pre02 + elevation_max, c)
 
 stargazer(m1, m2, type = "text")
 stargazer(m2, type = "latex", star.cutoffs = NA,
@@ -163,9 +162,6 @@ c <- c %>% filter(distname != "") %>%
 districts_joined <- left_join(
   districts, c, by = c("NAME_3" = "distname")
 )
-
-
-
 
 ```
 
