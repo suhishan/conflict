@@ -21,10 +21,14 @@ rename q04 marital_status
 replace marital_status = (marital_status == 2)
 rename ethnicty ethnicity
 recode sex (2=0) // 1 is male and 0 is female.
-drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions.
+drop if age<=10 // people aged 10 or lower are dropped for comparability while we do still wanna see teenage labor outcomes.
 
 *NLFS year*
 gen nlfs_year = 1998
+
+*urban/rural
+
+gen urbrur = (urbrural == 1 | urbrural == 2)
 
 
 /* On Districts */
@@ -176,7 +180,7 @@ tabstat currently_active, by(district) stat(mean)
 * Keep all the necessary variables from NLFS individual_merged.dta, and save it in another file for appending with NLFS 2*
 
 #delimit ;
-keep nlfs_year sex age hhsize marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
+keep nlfs_year sex age hhsize urbrur marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
 wage_hours selfemp_hours work_hours nonwork_hours total_hours 
 currently_emp currently_unemp currently_underemp
 currently_active currently_inactive
@@ -203,6 +207,10 @@ drop if missing(q36t)
 *NLFS year*
 gen nlfs_year = 2008
 
+*Urban/Rural
+
+replace urbrur = 0  if urbrur == 2
+
 // renaming some variables.
 
 rename q09 sex
@@ -211,7 +219,7 @@ rename totmemb hhsize
 rename q13 marital_status
 replace marital_status = (marital_status == 2)
 recode sex (2=0) // 1 is male and 2 is female
-drop if age<=5 // people aged 5 or lower are dropped because they are not asked labor market questions
+drop if age<=10 // people aged 10 or lower are dropped for comparability while we do still wanna see teenage labor outcomes.
 
 * Matching religion with NLFS 1*
 gen religion_recode = religion
@@ -338,7 +346,7 @@ replace district_abbrev = "dadh" if district_abbrev == "dade"
 * Keeping only relevant variables and save in another file for ease of append.*
 
 #delimit ;
-keep nlfs_year sex age hhsize marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
+keep nlfs_year sex age hhsize urbrur marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
 wage_hours selfemp_hours work_hours nonwork_hours total_hours 
 currently_emp currently_unemp currently_underemp
 currently_active currently_inactive
@@ -363,6 +371,8 @@ save "appended_nlfs.dta", replace
 * Merge with the conflict data for treatment/control status*
 merge m:1 district_abbrev using "Conflict Data\conflict_collapsed.dta", keepusing(treatment treatment_65)
 save "appended_nlfs.dta", replace
+
+eee
 
 /* Now the dataset is ready for analysis */
 
