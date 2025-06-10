@@ -27,27 +27,75 @@ replace district = "tehrathum" if district == "terhathum"
 replace district = "dadheldura" if district == "dadeldhura"
 
 
-
-
-
-
-* Seeing what proportion of deaths occurred before 1999 for each district.*
+* Seeing what proportion of deaths occurred before each of the years.  for each district.*
+gen pre97 = (year < 1997)
+gen pre98 = (year < 1998)
 gen pre99 = (year < 1999)
+gen pre00 = (year < 2000)
+gen pre01 = (year < 2001)
 gen pre02 = (year < 2002)
+gen pre03 = (year < 2003)
+gen pre04 = (year < 2004)
+gen pre05 = (year < 2005)
+gen pre06 = (year < 2006)
+
+gen deaths_pre97 = best_est if pre97 == 1
+gen deaths_post97 = best_est if pre97 == 0
+
+gen deaths_pre98 = best_est if pre98 == 1
+gen deaths_post98 = best_est if pre98 == 0
+
 gen deaths_pre99 = best_est if pre99 == 1
 gen deaths_post99 = best_est if pre99 == 0
+
+gen deaths_pre00 = best_est if pre00 == 1
+gen deaths_post00 = best_est if pre00 == 0
+
+
+gen deaths_pre01 = best_est if pre01 == 1
+gen deaths_post01 = best_est if pre01 == 0
+
 gen deaths_pre02 = best_est if pre02 == 1
 gen deaths_post02 = best_est if pre02 == 0 // Remember even if it says post02, it includes 02, however pre02 doesnot include 02.
 
-gen incidents = 1 // To coun the number of incidents per district later on.
+gen deaths_pre03 = best_est if pre03 == 1
+gen deaths_post03 = best_est if pre03 == 0
+
+gen deaths_pre04 = best_est if pre04 == 1
+gen deaths_post04 = best_est if pre04 == 0
+
+gen deaths_pre05 = best_est if pre05 == 1
+gen deaths_post05 = best_est if pre05 == 0
+
+gen deaths_pre06 = best_est if pre06 == 1
+gen deaths_post06 = best_est if pre06 == 0 // Also contains 2006
+
+gen incidents = 1 // To count the number of incidents per district later on.
 
 
 // Collapsing the data to estimate total number of deaths and other variables by district.
-collapse (sum)  deaths_a deaths_b deaths_civilians deaths_unknown best_est high_est low_est deaths_pre99 deaths_post99 deaths_pre02 deaths_post02 incidents, by(district) 
+
+#delimit;
+collapse (sum)  deaths_a deaths_b deaths_civilians deaths_unknown best_est high_est low_est 
+deaths_pre97 deaths_post97
+deaths_pre98 deaths_post98
+deaths_pre99 deaths_post99
+deaths_pre00 deaths_post00
+deaths_pre01 deaths_post01
+deaths_pre02 deaths_post02
+deaths_pre03 deaths_post03
+deaths_pre04 deaths_post04
+deaths_pre05 deaths_post05
+deaths_pre06 deaths_post06
+pre97 pre98 pre99 pre00 pre01 pre02 pre03 pre04 pre05 pre06
+
+incidents, by(district) 
+
+;
+#delimit cr;
 *encode district, generate(district_factor) // turn district names into factors/numbers.
 
-gen propdeaths_pre99 = deaths_pre99/deaths_post99 
-gen propdeaths_pre02 = deaths_pre02/deaths_post02
+
 gen district_abbrev = lower(substr(district, 1, 4))
 replace district_abbrev = "dhak" if district == "dhankuta"
 replace district_abbrev = "sinp" if district == "sindhupalchowk"
@@ -88,7 +136,6 @@ save "Conflict Data\conflict_collapsed.dta", replace
 
 	*First Stage Regression*
 	gen forest_cover = round(norm_forest * 100, .001)
-	gen elevation = elevation_max * 1000
 
 	reg best_est forest_cover elevation, vce(robust)
 
@@ -103,6 +150,7 @@ save "Conflict Data\conflict_collapsed.dta", replace
 	save "Conflict Data\conflict_collapsed.dta", replace
 
 
+	ee
 * Some descriptive Statistics*
 tabstat best_est, by(treatment) stats (mean n sd)
 
