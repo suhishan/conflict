@@ -105,52 +105,34 @@ save "Conflict Data\conflict_collapsed.dta", replace
 
 /* Load the forest dataset */
 
-	use "Do and Iyer\forest.dta", clear
-	gen district = trim(lower(distname))
+use "Do and Iyer\forest.dta", clear
+gen district = trim(lower(distname))
 
-	replace district = "chitwan" if district == "chitawan" 
-	replace district = "kavre" if district == "kavrepalanchok"
-	replace district = "sindhupalchowk" if district == "sindhupalchok"
-	replace district = "dhanusha" if district == "dhanusa"
-	replace district = "tehrathum" if district == "terhathum"
+replace district = "chitwan" if district == "chitawan" 
+replace district = "kavre" if district == "kavrepalanchok"
+replace district = "sindhupalchowk" if district == "sindhupalchok"
+replace district = "dhanusha" if district == "dhanusa"
+replace district = "tehrathum" if district == "terhathum"
 
-	gen district_abbrev =  lower(substr(district, 1, 4))
-	replace district_abbrev = "dhak" if district == "dhankuta"
-	replace district_abbrev = "sinp" if district == "sindhupalchowk"
-	replace district_abbrev = "dadh" if district_abbrev == "dade"
+gen district_abbrev =  lower(substr(district, 1, 4))
+replace district_abbrev = "dhak" if district == "dhankuta"
+replace district_abbrev = "sinp" if district == "sindhupalchowk"
+replace district_abbrev = "dadh" if district_abbrev == "dade"
 
-	/* Merge the conflict dataset with the forest data */
+/* Merge the conflict dataset with the forest data */
 
-	merge 1:1 district_abbrev using "Conflict Data\conflict_collapsed.dta"
-	save "Conflict Data\conflict_collapsed.dta", replace
+merge 1:1 district_abbrev using "Conflict Data\conflict_collapsed.dta"
+save "Conflict Data\conflict_collapsed.dta", replace
 
-
-	/* Now, we are trying to gauge treatment and control districts
-
-	Two stylized methods: 
-	1. Using the 75th percentile of forest cover to determine treatment and control.
-	2. Using pre 1999 conflict levels, or pre 2002 conflict, which may be endogenous tho. */
-
-	drop if district == "not available"
-	*Using the 75th percentile for forest cover to determine treatment and control*
-
-	*First Stage Regression*
-	gen forest_cover = round(norm_forest * 100, .001)
-
-	reg best_est forest_cover elevation, vce(robust)
-
-	sum forest_cover, detail
-	scalar p75 = r(p75)
-	gen treatment = (forest_cover > p75)
-	
-	_pctile forest_cover, p(65)
-	scalar p65 = r(r1)
-	gen treatment_65 = (forest_cover > p65)
-
-	save "Conflict Data\conflict_collapsed.dta", replace
+drop if district == "not available"
+save "Conflict Data\conflict_collapsed.dta", replace
 
 
-	ee
+
+
+
+/* For now, I have removed the code for defining treatment and control districts so that analysis is not confused with R.
+
 * Some descriptive Statistics*
 tabstat best_est, by(treatment) stats (mean n sd)
 
@@ -171,5 +153,7 @@ esttab using "Data Presentation/ttest_2.tex",
  addnote("Note: Difference defined as Control-Treatmenet." "Source: Data from Do and Iyer (2008)" "* 0.1 ** 0.05") ///Note below table
 ;
 #delimit cr;
+
+*/
 
 

@@ -31,14 +31,14 @@ c <- read_dta("Conflict Data/conflict_collapsed.dta")
 c %>% View()
 
 # Reading the html file.
-censustable_1 <- read_html("CENSUSTABLE 1.htm")
+censustable_1 <- read_html("2001 Census Tables/CENSUSTABLE 1.htm")
 tables <- censustable_1 %>% 
   html_element("table")
 
 
 tables_df <- 
-  tables %>% html_table(fill = T) 
-  select(X1,X3) %>% 
+  tables %>% html_table(fill = T) %>% 
+  select(X1, X3) %>% 
   rename( name = X1, population = X3
   ) %>% 
   mutate(
@@ -291,9 +291,8 @@ age_tables3 <- age_tables3 %>%
 View(age_tables3)
 
 under10_3 <- age_tables3 %>% 
-  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>% 
+  filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>%
   mutate(TotalPct = parse_number(as.character(TotalPct)))
-
 
 
 result_age_3 <- under10_3 %>% 
@@ -374,10 +373,6 @@ final_conflict <- final_conflict %>%
   ) %>% 
   mutate(popn_over_10 = (1- cumUnder10/100) * TotalPopn)
 
-
-final_conflict %>% 
-  group_by(treatment) %>% 
-  summarize(mean(total_emp/popn_over_10))
 
 write_dta(final_conflict, "final_conflict.dta")
 ```

@@ -19,36 +19,6 @@ theme_set(theme_minimal() +
 options(scipen = 999)
 ```
 
-```{r}
-
-conflict <- read_dta("Conflict Data/conflict.dta") %>% 
-  filter(year>1995 & year <2007) %>% 
-  mutate(district = adm_2)
-
-
-# See proportion of deaths before 1998 w.r.t to total deaths. 
-pre99 <- conflict %>% group_by(district) %>% 
-  filter(year<1999) %>% 
-  summarize(deaths_pre99 =  sum(best_est) )
-
-pre07 <- conflict %>% group_by(district) %>% 
-  filter(year>1998 & year<2007) %>% 
-  summarize(deaths_pre07 =  sum(best_est))
-
-total <- merge(pre99, pre07, by= "district", all.y = TRUE) %>% 
-  mutate(
-    deaths_pre99 = ifelse(is.na(deaths_pre99), 0, deaths_pre99),
-    prop_pre99 = round(deaths_pre99/deaths_pre07, 2)
-  )
-
-total %>% 
-  ggplot(aes(x = prop_pre99, y = deaths_pre07))+
-  geom_point(color = "navyblue", shape = 1)
-
-summary(lm(deaths_pre07 ~ deaths_pre99, data = total))
-```
-
-
 On classification into treatment and control:
 There are a lot of misspecification tests that one must conduct but I will do that later. 
 
@@ -58,29 +28,7 @@ c <- read_dta("Conflict Data/conflict_collapsed.dta")
 c <- c  %>% 
   mutate(forest_cover = round(norm_forest * 100, 3),
          poverty_rate = round(pov_rate * 100, 3),
-         
          high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),1, 0))
-
-
-#First Stage Plot of Conflict Deaths and forest cover.
-
-
-m1 <- lm(best_est ~ forest_cover, c)
-m2 <- lm(best_est ~ high_forest + elevation_max, c); summary(m2)
-m2_1 <- lm(best_est ~ high_forest + elevation_max + propdeaths_pre02 + poverty_rate, c ); summary(m2_1)
-
-m3 <- lm(best_est ~ high_forest + propdeaths_pre02 + elevation_max, c)
-
-stargazer(m1, m2, type = "text")
-stargazer(m2, type = "latex", star.cutoffs = NA,
-          omit = c("elevation_max"),
-          keep.stat = c("n", "rsq","adj.rsq"),
-          covariate.labels = c("Forest Cover > p75 (1/0)"),
-          dep.var.labels = c("Conflict Deaths"),
-          out = "Data Presentation/first_stage_reg.tex",
-          notes = NULL,
-          notes.append = F)
-stargazer(m3, type = "text")
 
 ```
 
@@ -152,12 +100,14 @@ c %>%
 Let's make a map with conflict deaths.
 
 ```{r}
-districts <- st_read("Nepal Shapfiles GADM/gadm36_NPL_3.shp")
-districts <- districts %>% 
-  mutate(NAME_3 = tolower(NAME_3))
-c <- c %>% filter(distname != "") %>% 
-  mutate(distname = tolower(distname))
+# read district names and geospatial information from the shape file. 
+districts <- st_read("Nepal Shapfiles GADM/gadm36_NPL_3.shp") 
 
+districts <- districts %>% 
+  mutate(NAME_3 = tolower(NAME_3)) #district names to lowercase for merging.
+
+c <- c %>% filter(distname != "") %>% 
+  mutate(distname = tolower(distname)) # using plain old distname and NOT district_abbrev to merge with geospatial districts
 
 districts_joined <- left_join(
   districts, c, by = c("NAME_3" = "distname")
@@ -252,8 +202,10 @@ p3 <-
   )
 p3
 
-p4 <-   ggplot(districts_joined) +
-  geom_sf(aes(fill = factor(treatment)), color = "black", size = 0.2, alpha = 0.8) +
+
+p4 <- ggplot(districts_joined) +
+  geom_sf(aes(fill = factor(treatment)), color = "black",
+          size = 0.2, alpha = 0.8) +
   labs(
     title = "Treatment and Control Districts",
     subtitle = "Treatment Status determined by districts whose forest cover is higher than the 75th percentile",
@@ -265,13 +217,13 @@ p4 <-   ggplot(districts_joined) +
     aes(label = district),
     size = 2,
     color = "black"
-  ) +
+  ) +n
   scale_fill_manual(
     values =c( "0" = "white", "1" = "#800000"),
     labels = c("Control", "Treatment"),
     name = "Treatment Status"
   )
-p4
+
 ggsave("treatment.jpg", plot = p4, path = "Data Presentation", bg = "white",
        width = 30, height = 15, units = "cm")
 (p1 | p4)

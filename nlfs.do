@@ -368,9 +368,12 @@ use "NLFS 1\kept_individual.dta"
 append using "NLFS 2\Data\kept_individual.dta"
 save "appended_nlfs.dta", replace
 
+
+/* Again, I have removed the code for assigning treatment and control status from stata so that there is no more confusion
 * Merge with the conflict data for treatment/control status*
 merge m:1 district_abbrev using "Conflict Data\conflict_collapsed.dta", keepusing(treatment treatment_65)
 save "appended_nlfs.dta", replace
+*/
 
 
 
