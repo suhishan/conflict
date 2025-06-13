@@ -28,47 +28,30 @@ replace district = "dadheldura" if district == "dadeldhura"
 
 
 * Seeing what proportion of deaths occurred before each of the years.  for each district.*
-gen pre97 = (year < 1997)
-gen pre98 = (year < 1998)
-gen pre99 = (year < 1999)
-gen pre00 = (year < 2000)
-gen pre01 = (year < 2001)
-gen pre02 = (year < 2002)
-gen pre03 = (year < 2003)
-gen pre04 = (year < 2004)
-gen pre05 = (year < 2005)
-gen pre06 = (year < 2006)
+gen year96 = (year == 1996)
+gen year97 = (year == 1997)
+gen year98 = (year == 1998)
+gen year99 = (year == 1999)
+gen year00 = (year == 2000)
+gen year01 = (year == 2001)
+gen year02 = (year == 2002)
+gen year03 = (year == 2003)
+gen year04 = (year == 2004)
+gen year05 = (year == 2005)
+gen year06 = (year  == 2006)
 
-gen deaths_pre97 = best_est if pre97 == 1
-gen deaths_post97 = best_est if pre97 == 0
+gen deaths_96 = best_est if year96 == 1
+gen deaths_97 = best_est if year97 == 1
+gen deaths_98 = best_est if year98 == 1
+gen deaths_99 = best_est if year99 == 1
+gen deaths_00 = best_est if year00 == 1
+gen deaths_01 = best_est if year01 == 1
+gen deaths_02 = best_est if year02 == 1
+gen deaths_03 = best_est if year03 == 1
+gen deaths_04 = best_est if year04 == 1
+gen deaths_05 = best_est if year05 == 1
+gen deaths_06 = best_est if year06 == 1
 
-gen deaths_pre98 = best_est if pre98 == 1
-gen deaths_post98 = best_est if pre98 == 0
-
-gen deaths_pre99 = best_est if pre99 == 1
-gen deaths_post99 = best_est if pre99 == 0
-
-gen deaths_pre00 = best_est if pre00 == 1
-gen deaths_post00 = best_est if pre00 == 0
-
-
-gen deaths_pre01 = best_est if pre01 == 1
-gen deaths_post01 = best_est if pre01 == 0
-
-gen deaths_pre02 = best_est if pre02 == 1
-gen deaths_post02 = best_est if pre02 == 0 // Remember even if it says post02, it includes 02, however pre02 doesnot include 02.
-
-gen deaths_pre03 = best_est if pre03 == 1
-gen deaths_post03 = best_est if pre03 == 0
-
-gen deaths_pre04 = best_est if pre04 == 1
-gen deaths_post04 = best_est if pre04 == 0
-
-gen deaths_pre05 = best_est if pre05 == 1
-gen deaths_post05 = best_est if pre05 == 0
-
-gen deaths_pre06 = best_est if pre06 == 1
-gen deaths_post06 = best_est if pre06 == 0 // Also contains 2006
 
 gen incidents = 1 // To count the number of incidents per district later on.
 

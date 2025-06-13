@@ -8,7 +8,6 @@ setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
 library(haven)
 library(tidyverse)
 library(stargazer)
-library(geodata)
 library(sf)
 library(patchwork)
 
@@ -28,7 +27,6 @@ options(scipen = 999)
 
 ```{r}
 c <- read_dta("Conflict Data/conflict_collapsed.dta")
-c %>% View()
 
 # Reading the html file.
 censustable_1 <- read_html("2001 Census Tables/CENSUSTABLE 1.htm")
@@ -94,7 +92,7 @@ popn_df <- censustable_3 %>%
   mutate(rownumber = 1:n()) %>% 
   filter(rownumber>4 & rownumber !=86)
 
-View(popn_df)
+
 ```
 
 
@@ -166,7 +164,7 @@ emp_info <- emp_info %>%
   add_row(district_name = "TANAHUN", total_emp = 107648, male_emp = 50941,
           female_emp = 56707) # there was some issue with tanahun data so bruteforcing entry.
 
-View(emp_info)
+
 ```
 
 
@@ -288,7 +286,7 @@ age_tables3 <- age_tables3 %>%
   ) %>% 
   fill(District, .direction = "down")
 
-View(age_tables3)
+
 
 under10_3 <- age_tables3 %>% 
   filter(grepl("^UNDER 1 YR\\.$|^[1-9] YEAR(S)?$|^10 YEARS$", AgeGroup)) %>%
@@ -331,14 +329,14 @@ district_under10 <- district_under10 %>% filter(!is.na(district_name) & !duplica
   arrange(district_name) %>% 
   mutate(district_id = 1:n())
 
-View(district_under10)
+
 
 emp_info <- emp_info %>% 
   mutate(district_name = ifelse(district_name == "MOHOTTARI", "MAHOTTARI",district_name)) %>% 
   arrange(district_name) %>% 
   mutate(district_id = 1:n())
 
-View(emp_info)
+
 
 
 a <- right_join(popn_df, district_under10, by = c("district_id"))
@@ -357,13 +355,13 @@ b <- left_join(a, emp_info, by = c("district_id")) %>% select(-1, -7) %>%
   ) %>% 
   mutate( district_abbrev = tolower(substr(district_name, 1, 4)))
 
-View(b)
+
 # b is now the working version
 
 # Let's now merge this with the conflict data. 
 c <- read_dta("Conflict Data/conflict_collapsed.dta")
 final_conflict <- left_join(c, b, by = c("district_abbrev"))
-View(final_conflict)
+
 
 final_conflict <- final_conflict %>% 
   mutate(
@@ -377,3 +375,4 @@ final_conflict <- final_conflict %>%
 write_dta(final_conflict, "final_conflict.dta")
 ```
 
+x
