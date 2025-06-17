@@ -1,3 +1,8 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 All the packages I need and some plot options.
 
 ```{r}
@@ -8,6 +13,7 @@ library(stargazer)
 library(patchwork)
 library(dagitty)
 library(sf)
+library(ddecompose)
 
 theme_set(theme_minimal() +
             theme(panel.grid = element_blank()))
@@ -93,8 +99,56 @@ c_merged <- c_merged %>% mutate(
   usually_emp = as.factor(usually_emp),
   age = as.double(age),
   years_of_edu = as.double(years_of_edu)
-  
 )
+
+
+
+```
+
+I want to calculate normalized difference table like that in DiD practitioner's guide Page 16.x
+
+What are the variables that I should look at observable differences of:
+
+Thinking out loud: Age, years of education, being a Hindu, being a Brahmin/Chetri, being a woman, these are all correlated with whether you are usually employed or not. If these relationships would've held in the absence of Maoist conflict, and if more conflict and less conflict districts, differ in these demographic and economic characteristics, then parallel trends assumption may fail to hold. 
+
+Let's now look at baseline (1998, t = 1) covariate levels between high-conflict and low-conflict districts. 
+
+```{r}
+#function to calculate normalized difference
+norm_difference <- function(t, x) {
+  mean_t <-  mean(x[t == 1], na.rm = T)
+  mean_c <-  mean(x[t == 0], na.rm = T)
+  sd_t <-  sd(x[t == 1],na.rm =T)
+  sd_c <- sd(x[t==0], na.rm = T )
+  norm_diff = (mean_t - mean_c) / sqrt(0.5 * (sd_t^2 * sd_c^2))
+  return (round(norm_diff, digits = 4))
+}
+
+c_merged_98 <- c_merged %>% filter(nlfs_year == 1998)
+
+
+c_merged_98 %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_crude, hhsize,
+         ever_school) %>% 
+  summarize(across(
+    .cols = -treatment_crude,
+    .fns = list(
+      norm_diff = ~norm_difference(treatment_crude, .x),
+      mean_t  = ~ mean(.x[treatment_crude == 1], na.rm = T),
+      mean_c = ~mean(.x[treatment_crude == 0], na.rm = T)),
+    .names = "{fn}_{.col}"
+  )) %>% 
+ pivot_longer(
+    cols = everything(),
+    names_to = "stat_var", values_to = "value"
+  ) %>% 
+  extract(stat_var, into = c("stat", "variable"),
+          regex = "(norm_diff|mean_t|mean_c)_(.+)") %>% 
+  pivot_wider(
+    names_from = stat, values_from = value
+  )
 
 
 
