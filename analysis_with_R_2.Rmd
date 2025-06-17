@@ -1,0 +1,105 @@
+All the packages I need and some plot options.
+
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+
+#Load Datasets.
+
+```{r}
+nlfs <- read_dta("appended_nlfs.dta") # Only people aged 10 and above. 
+c <- read_dta("final_conflict.dta")
+
+# Renaming and mutating most of the variables that I will need.
+
+
+#select only the relevant variables. 
+c <- c %>% select(
+  distname, elevation_max,norm_forest, pov_rate, district_abbrev, best_est, 30:51, incidents
+)
+
+c <- c %>% mutate(
+    forest_cover = round(norm_forest*100, 2),
+    poverty_rate = round(pov_rate* 100, 2), #note: Dolpa, Mustang and Rasuwa don't have poverty rate estimates.
+    # manang and mustang (NA no conflict deaths) turned to 0 
+    conflict_deaths = ifelse(is.na(best_est),
+                             0,
+                             best_est)
+    )
+
+```
+
+# Figuring out Temporary Treatment and Control. 
+
+This is temporary for now: I'll probably use districts with extremely high conflict deaths as treatment and rest as control. 
+
+```{r}
+
+# histogram of deaths. 
+c %>% 
+  ggplot(aes(x = conflict_deaths)) +
+  geom_histogram(color = "black", fill = "firebrick", bins = 30)
+
+#t-plot of deaths. 
+
+c %>% 
+  ggplot(aes(x = 1:length(conflict_deaths), y = conflict_deaths))+
+  geom_point(shape = 1, color = "firebrick")
+
+# For now, let's divide the data into two parts, conflict deaths > 75th percentile  as treatment and others  as control. Just for testing everything. 
+
+c <- c %>% mutate(
+  treatment_crude = 
+    ifelse(conflict_deaths > quantile(conflict_deaths, 0.75), 
+                           1, 0)
+)
+
+# Let's see different histograms for crude treatment and how many are on the boundary. 
+
+c %>% 
+  ggplot(aes(x = 1:length(conflict_deaths), y = deaths_96 + deaths_97 + deaths_98))+
+  geom_point(aes(color = treatment_crude), size = 3)
+  
+# For now the division is really crude, but we can use all kinds of divisions. # This is just for now really. and also it is crude. 
+
+  
+```
+
+
+#Controlling for stuff using 1998 (pre-treatment variables)
+
+Let's merge with the nlfs data:
+
+```{r}
+c_merged <- left_join(nlfs, c, by = c("district_abbrev"))
+
+c_merged <- c_merged %>% mutate(
+  id = as.numeric(1:n()),
+  post = as.double(ifelse(nlfs_year == 2008, 1, 0)),
+  treatment_crude = as.double(treatment_crude),
+  brahmin_chhetri = as.double(brahmin_chhetri),
+  hindu = as.double(hindu),
+  usually_emp = as.factor(usually_emp),
+  age = as.double(age),
+  years_of_edu = as.double(years_of_edu)
+  
+)
+
+
+
+```
+
+
+
+

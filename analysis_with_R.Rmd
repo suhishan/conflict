@@ -343,6 +343,27 @@ Elevation -> "Poverty Rate"
 
 DAG for first stage where by treatment and control will be determined by districts afflicted with conflict before 2001 and districts that were not.
 
+```{r}
+dag {
+"Deaths post 01" [outcome,pos="0.987,0.287"]
+"Deaths pre 02" [exposure,pos="-1.606,0.240"]
+"Elevation Max" [pos="-1.578,-0.779"]
+"Forest Cover" [pos="-0.652,-1.106"]
+"Poverty Rate 95" [pos="0.238,-1.106"]
+"Deaths pre 02" -> "Deaths post 01"
+"Elevation Max" -> "Deaths post 01"
+"Elevation Max" -> "Deaths pre 02"
+"Elevation Max" -> "Forest Cover"
+"Elevation Max" -> "Poverty Rate 95"
+"Forest Cover" -> "Deaths post 01"
+"Forest Cover" -> "Deaths pre 02"
+"Poverty Rate 95" -> "Deaths post 01"
+"Poverty Rate 95" -> "Deaths pre 02"
+}
+
+```
+ 
+
 
 ```{r}
 # are grouped means different from ungrouped ones: test.
