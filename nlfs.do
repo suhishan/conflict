@@ -158,10 +158,10 @@ summarize married if age > 10 // (marital status questions are asked to peopled 
 
 
 * Education Metrics*
-gen can_read = q08
-gen can_write = q09
-gen current_attend = q10 
-gen ever_attend = q11
+gen can_read = (q08 == 1)
+gen can_write = (q09 == 1)
+gen current_attend = (q10 ==1)
+gen ever_attend = (q11 == 1)
 gen years_of_edu = q12
 
 gen edu_others = (q12 == 16)
@@ -190,6 +190,7 @@ usually_emp usually_unemp ;
 #delimit cr
 
 save "NLFS 1\kept_individual.dta", replace
+
 
 /*------------------------------------------------------------*
 NLFS 2 Descriptive Statistics
@@ -306,10 +307,10 @@ summarize married if age > 10 // (marital status questions are asked to peopled 
 
 
 * Education Metrics *
-gen can_read = q26
-gen can_write = q27
-gen current_attend = q28 
-gen ever_attend = q29
+gen can_read = (q26 == 1)
+gen can_write = (q27 == 1)
+gen current_attend = (q28 == 1) 
+gen ever_attend = (q29 == 1)
 gen years_of_edu = q30 // TODO: think about ways of recoding education to make it similar to NLFS 1.
 
 replace years_of_edu = . if inlist(years_of_edu, 16, 17) //  Literate and Illiterate are redundant info when we have can read and can write.
