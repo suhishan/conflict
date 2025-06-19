@@ -1,0 +1,262 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+All the packages I need and some plot options.
+
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+library(ddecompose)
+library(DRDID)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+
+#Load Datasets.
+
+```{r}
+nlfs <- read_dta("appended_nlfs.dta") # Only people aged 10 and above. 
+c <- read_dta("final_conflict.dta")
+
+# Renaming and mutating most of the variables that I will need.
+
+
+#select only the relevant variables. 
+c <- c %>% select(
+  distname, elevation_max,norm_forest, pov_rate, district_abbrev, best_est, 30:51, incidents
+)
+
+c <- c %>% mutate(
+    forest_cover = round(norm_forest*100, 2),
+    poverty_rate = round(pov_rate* 100, 2), #note: Dolpa, Mustang and Rasuwa don't have poverty rate estimates.
+    # manang and mustang (NA no conflict deaths) turned to 0 
+    conflict_deaths = ifelse(is.na(best_est),
+                             0,
+                             best_est)
+    )
+
+```
+
+# Figuring out Temporary Treatment and Control. 
+
+This is temporary for now: I'll probably use districts with extremely high conflict deaths as treatment and rest as control. 
+
+```{r}
+
+# histogram of deaths. 
+c %>% 
+  ggplot(aes(x = conflict_deaths)) +
+  geom_histogram(color = "black", fill = "firebrick", bins = 30)
+
+#t-plot of deaths. 
+
+c %>% 
+  ggplot(aes(x = 1:length(conflict_deaths), y = conflict_deaths))+
+  geom_point(shape = 1, color = "firebrick")
+
+# For now, let's divide the data into two parts, conflict deaths > 75th percentile  as treatment and others  as control. Just for testing everything. 
+
+c <- c %>% mutate(
+  treatment_crude = 
+    ifelse(conflict_deaths > quantile(conflict_deaths, 0.75), 
+                           1, 0)
+)
+
+# Let's see different histograms for crude treatment and how many are on the boundary. 
+
+c %>% 
+  ggplot(aes(x = 1:length(conflict_deaths), y = deaths_96 + deaths_97 + deaths_98))+
+  geom_point(aes(color = treatment_crude), size = 3)
+  
+# For now the division is really crude, but we can use all kinds of divisions. # This is just for now really. and also it is crude. 
+
+  
+```
+
+
+#Controlling for stuff using 1998 (pre-treatment variables)
+
+Let's merge with the nlfs data:
+
+```{r}
+c_merged <- left_join(nlfs, c, by = c("district_abbrev"))
+
+c_merged <- c_merged %>% mutate(
+  id = as.numeric(1:n()),
+  post = as.double(ifelse(nlfs_year == 2008, 1, 0))
+)
+```
+
+I want to calculate normalized difference table like that in DiD practitioner's guide Page 16.x
+
+What are the variables that I should look at observable differences of:
+
+Thinking out loud: Age, years of education, being a Hindu, being a Brahmin/Chetri, being a woman, these are all correlated with whether you are usually employed or not. If these relationships would've held in the absence of Maoist conflict, and if more conflict and less conflict districts, differ in these demographic and economic characteristics, then parallel trends assumption may fail to hold. 
+
+Let's now look at baseline (1998, t = 1) covariate levels between high-conflict and low-conflict districts. 
+
+```{r}
+#function to calculate normalized difference
+norm_difference <- function(t, x) {
+  mean_t <-  mean(x[t == 1], na.rm = T)
+  mean_c <-  mean(x[t == 0], na.rm = T)
+  sd_t <-  sd(x[t == 1],na.rm =T)
+  sd_c <- sd(x[t==0],na.rm = T )
+  norm_diff = (mean_t - mean_c) / sqrt(0.5 * (sd_t^2 * sd_c^2))
+  return (round(norm_diff, digits = 4))
+}
+
+c_merged_98 <- c_merged %>% filter(nlfs_year == 1998)
+
+
+c_merged_98 %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_crude, hhsize,
+         ever_school) %>% 
+  summarize(across(
+    .cols = -treatment_crude,
+    .fns = list(
+      norm_diff = ~norm_difference(treatment_crude, .x),
+      mean_t  = ~ mean(.x[treatment_crude == 1], na.rm = T),
+      mean_c = ~mean(.x[treatment_crude == 0], na.rm = T)),
+    .names = "{fn}_{.col}"
+  )) %>% 
+ pivot_longer(
+    cols = everything(),
+    names_to = "stat_var", values_to = "value"
+  ) %>% 
+  extract(stat_var, into = c("stat", "variable"),
+          regex = "(norm_diff|mean_t|mean_c)_(.+)") %>% 
+  pivot_wider(
+    names_from = stat, values_from = value
+  )
+
+```
+
+
+Let's now try and look at changes in covariate levels in treatment and control districts:
+
+So what we need is E_08(Age | D = 0) - E_98(Age | D = 0) and the same for D = 1.
+
+```{r}
+
+c_merged %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_crude, hhsize,post,
+         ever_school) %>% 
+  group_by(treatment_crude) %>% 
+  summarize(
+    across(
+      .cols = -post,
+      .fns = list(
+        delta = ~ mean(.x[post == 1], na.rm = T) - mean(.x[post == 0], 
+                                                        na.rm = T)),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop") %>% 
+    pivot_longer(cols = -treatment_crude, names_to = "variables",
+                 values_to = "delta") %>% 
+  pivot_wider(names_from = treatment_crude, values_from = delta,
+              names_prefix = "delta_")
+
+```
+
+
+Normalied difference for delta
+
+```{r}
+#This function is to calculate normalized difference in delta_X, so calculate mean difference in post/pre for both treatment and control, and also calculate the sd of the differences. 
+
+norm_diff_delta <- function(t, post, x) {
+  mean_delta_c = mean(x[t==0 & post ==1 ], na.rm =T) 
+                  - mean(x[t == 0 & post == 0], na.rm = T)
+  mean_delta_t = mean(x[t==1 & post ==1 ], na.rm = T) 
+                  - mean(x[t == 1 & post == 0], na.rm = T)
+  
+  sd_delta_c = sd(x[t==0 & post ==1 ], na.rm = T) 
+                  - sd(x[t == 0 & post == 0], na.rm = T)
+  sd_delta_t = sd(x[t==1 & post ==1 ], na.rm = T) 
+                  - sd(x[t == 1 & post == 0], na.rm = T)
+  
+  norm_diff = (mean_delta_t - mean_delta_c)/
+    sqrt(0.5 * (sd_delta_t^2 * sd_delta_c^2))
+  
+  return (round(norm_diff, 4))
+}
+
+c_merged %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_crude, hhsize,post,
+         ever_school) %>% 
+  summarize(
+    across(
+      .cols = -c(treatment_crude, post),
+      .fns = list(
+        norm_diff_delta = ~ norm_diff_delta(treatment_crude, post, .x)
+      ),
+      .names = "{.col}"
+    )
+  ) %>% pivot_longer(everything())
+
+
+```
+
+Outcome Regression
+
+So we are regressing delta Y | D = 0, for untreated units on X, then using the fitted values to get delta Y | D = 1 for treated units as well, and find nonparametric estimations for ATT.
+
+```{r}
+drdid(yname = "usually_emp", tname = "post", idname = "id",
+      dname = "treatment_crude",
+      xformla = ~  age + brahmin_chhetri + hindu,
+      data = c_merged, panel = FALSE, boot = F, nboot = 199)
+
+```
+
+Doubly Robust DiD for data grouped by district. 
+
+```{r}
+nlfs_grouped_m <- left_join(nlfs_grouped, c, by = c("district_abbrev") )
+covX <- c_merged %>% select(age, hindu, brahmin_chhetri, sex, poverty_rate)
+covX <- as.matrix(cbind(1, covX[,1:4]))
+
+
+
+drdid_rc(
+  c_merged$usually_emp,
+  c_merged$post,
+  c_merged$treatment_crude,
+  covariates = covX
+)
+
+
+```
+
+
+
+# Propensity Score Model. (for Transparency)
+
+Here, we use the pre-period 1998 data to construct a logit model where treatment status is regressed on covariates that may have influenced treatment assignment i.e. Regress treatment status on age, years of education, brahmin_chhetri and hindu for 2020.
+
+
+```{r}
+ps <- glm(treatment_crude ~ age + years_of_edu_all + ever_school + hindu + brahmin_chhetri, data = c_merged_98, family = binomial() )
+summary(ps)
+
+```
+
+
+

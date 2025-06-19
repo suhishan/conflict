@@ -1,0 +1,45 @@
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+library(ddecompose)
+library(DRDID)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+```{r}
+nlfs <- read_dta("appended_nlfs.dta")
+
+
+#Here I am calculating means of variables for each district, grouped by nlfs_year. 
+nlfs_grouped <- nlfs %>% 
+  group_by(nlfs_year, district_abbrev) %>% 
+  summarize(
+   across(
+     .cols = -district,
+     .fns = list(
+       mean = ~ round(mean(.x, na.rm = T), 4)
+     ),
+     .names = "{.col}"
+   ),
+   sample_w = n()
+  ) %>% 
+  ungroup()
+
+nlfs_grouped <- nlfs_grouped %>% 
+  mutate(post = ifelse(nlfs_year == 2008, 1, 0))
+
+```
+
+
+
+
+
+

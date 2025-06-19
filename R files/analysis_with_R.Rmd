@@ -1,0 +1,389 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+Some preliminary look at means to see the parallel trends.
+
+```{r}
+# load datasets.
+nlfs <- read_dta("appended_nlfs.dta")
+conflict <- read_dta("final_conflict.dta")
+
+
+conflict <- conflict %>%   mutate(
+  forest_cover = round(norm_forest * 100, 3),
+  treatment = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),1, 0 ))
+
+# 1991 means for treatment and control
+info_91 <-  conflict %>% group_by(treatment) %>% 
+  summarize(
+    info_91 =  mean(total_emp/popn_over_10) *100
+  )
+
+# 1998  means
+info_98 <- nlfs %>% 
+  filter(nlfs_year == 1998 & age>10) %>% 
+  group_by(treatment) %>% 
+  summarize(
+    info_98  =  mean(usually_emp, na.rm =T)  * 100,
+    info_98_sd = binary_sd(usually_emp)
+  )
+  
+#2008 means
+info_08 <- nlfs %>% 
+  filter(nlfs_year == 2008 & age>10) %>% 
+  group_by(treatment) %>% 
+  summarize(
+    info_08  =  mean(usually_emp, na.rm =T) * 100  
+  )
+
+bind_cols(info_91, info_98[,2], info_08[,2]) %>% 
+  pivot_longer(
+    cols = c(info_91, info_98, info_08),
+    names_to = "data_year",
+    values_to = "emp"
+  ) %>% 
+  mutate(treatment = c(0,0,0,1,1,1),
+         year = c(1, 8, 18, 1, 8, 18)) %>% 
+  ggplot(aes(x = year , y = emp)) +
+  geom_line(aes(group = treatment, col = treatment))
+  
+
+
+```
+
+Extremely Preliminary First Stage Regression:
+
+
+```{r}
+c <- read_dta("final_conflict.dta")
+
+c <- c  %>% 
+  mutate(forest_cover = round(norm_forest * 100, 3),
+         best_est = ifelse(is.na(best_est), 0, best_est),
+         # Manang and Mustang had no deaths but we can't exclude it from our analysis so NA is converted to 0.
+         forest_cover_std = rethinking::standardize(forest_cover),
+         elevation_std = rethinking::standardize(elevation_max),
+         poverty_rate_std = rethinking::standardize( round(pov_rate * 100, 3)),
+         high_forest = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T),1, 0),
+         high_forest_65 = ifelse(forest_cover > quantile(forest_cover, 0.65, na.rm =T),1, 0),
+         conflict_deaths_std = rethinking::standardize(best_est),
+         deaths_per_1000 = (best_est/TotalPopn) * 1000,
+         deaths_per_10000 =(best_est/TotalPopn) * 10000,
+         deaths_per_10000_std = rethinking::standardize(deaths_per_10000)
+         )
+
+
+#First Stage Plot of Conflict Deaths and forest cover.
+# The DAG shows that for the first stage, we need only control for elevation. 
+
+# Since I am looking at deaths per 10000 population, I want to look at the histogram of deaths per 10000 population.
+
+c %>% 
+  filter(best_est !=0) %>% 
+  ggplot(aes(x = deaths_per_10000))+
+  geom_histogram(color = "black", bins = 30, fill = "skyblue")+
+  geom_vline(xintercept = mean(c$deaths_per_10000, na.rm = T), linetype = 2)
+
+## Let's also draw the map for conflict deaths per 10000 population. 
+#Joining geospatial district data with conflict data c.
+
+districts <- st_read("Nepal Shapfiles GADM/gadm36_NPL_3.shp")
+districts <- districts %>% 
+  mutate(NAME_3 = tolower(NAME_3))
+
+c <- c %>% filter(distname != "") %>% 
+  mutate(distname = tolower(distname))
+
+districts_joined <- left_join(
+  districts, c, by = c("NAME_3" = "distname")
+)
+
+# Now let's draw the map 
+
+p1 <- ggplot(districts_joined) +
+  geom_sf(aes(fill = deaths_per_10000), color = "white", size = 0.2) +
+  scale_fill_gradient(
+    low = "#ffe6f6",
+    high = "#990000",
+    na.value = "grey90",
+    name = "Deaths"
+  ) +
+  labs(
+    title = "Total Conflict Deaths by District (Maoist Insurgency, Nepal)",
+    subtitle = "Circa 1996-2006",
+    caption = "Data source: Uppsala Conflict Data Program",
+    fill = "Conflict Deaths"
+  ) 
+
+
+# [ ] TODO: Maybe convert the deaths information into terciles (low 33%, medium 33% and highest 33% and draw the map that way. )
+
+
+m1 <- lm(conflict_deaths_std ~ high_forest+ elevation_std, c); summary(m1)
+m2 <- lm(conflict_deaths_std ~ high_forest_65 + elevation_std, c); summary(m2)
+
+m3 <- lm(deaths_per_10000_std ~ high_forest + elevation_std, c); summary(m3)
+m4 <- lm(deaths_per_10000_std ~ high_forest_65 + elevation_std, c); summary(m4)
+
+
+
+
+stargazer(m1, m2 ,m3, m4, type = "latex", star.cutoffs = NA,
+          omit = c("elevation_max"),
+          keep.stat = c("n", "rsq","adj.rsq"),
+          covariate.labels = c("Forest Cover > p75 (1/0)", "Forest Cover > p65 (1/0)",
+                               "Maximum Elevation(std)"),
+          dep.var.labels = c("Conflict Deaths (std)","C. Deaths per 10000 population(std)"),
+          notes = "(std) represents standardized variables",
+          out = "First Draft/first_stage_reg.tex",
+          title = "Regression: Conflict Deaths(std) on Forest Cover Dummy",
+          notes.append =F)
+
+```
+
+
+Collapsing the nlfs data on employment and other stuff by district. Let's see if this works. 
+
+```{r}
+binary_sd <- function(vector) {
+  mean_vector = mean(vector, na.rm = T)
+  return (sqrt(mean_vector * (1 - mean_vector)))
+}
+
+
+nlfs_grouped <- nlfs %>% 
+  filter(!is.na(usually_emp)) %>% 
+  group_by(nlfs_year, district_abbrev) %>% 
+  summarize(usually_emp = mean(usually_emp, na.rm = T),
+            usually_emp_sd = binary_sd(usually_emp)) %>% 
+  pivot_wider(names_from = nlfs_year,
+              values_from = c(usually_emp, usually_emp_sd))
+
+
+nlfs_grouped <- left_join(c, nlfs_grouped, by = c("district_abbrev"))
+
+# NOTE: Turns out, for these district-level averages to amount to the same averages as the huge NLFS dataset, I will need weights i.e. number of observations at each district and then I must take a *WEIGHTED MEAN*
+
+```
+
+
+
+
+Now we look at a different way to convert our data into treatment and control. Disitricts where there is at least one incident or death before 2002 will be considered and the rest control. 
+
+Let's first look at the districts with at least one death before 2002.
+
+```{r}
+# a function to calculate geometric average from change in growth rates. 
+geom_average <- function(end, start) {
+  average = ((end / start) ^ (1/4) - 1 )
+  return (round(average, digit = 3))
+}
+
+
+c <- c  %>% 
+  rowwise() %>% 
+  mutate(deaths_02 = ifelse(deaths_02 == 0, 0.1, deaths_02)) %>% 
+  mutate(deaths_growth_post01 = geom_average(best_est, deaths_02),
+         deaths_pre02 = sum(c_across(deaths_96:deaths_01)),
+         deaths_post01 = sum(c_across(deaths_02:deaths_06)),
+         incidents_pre02  = sum(c_across(year96:year01)),
+         incidents_post01 = sum(c_across(year02:year06))) %>%
+  ungroup() %>% 
+  mutate(
+  deaths_pre02 = ifelse(is.na(deaths_pre02), 0, deaths_pre02),
+  deaths_post01 = ifelse(is.na(deaths_post01), 0, deaths_post01)
+         ) %>% 
+  mutate(
+    deaths_pre02_std = rethinking::standardize(deaths_pre02),
+    deaths_post01_std = rethinking::standardize(deaths_post01),
+
+  )
+  
+  
+# First Stage scatterplot  
+first_stage_2 <- c %>% 
+  ggplot(aes(x = deaths_pre02_std, y = deaths_post01_std)) +
+  geom_point(shape = 1, size = 2, color = "firebrick")+
+  labs(title = "Relationship between deaths before 2002 and deaths in \n2002  and after",
+       x  = "Deaths Before 2002",
+       y = "Deaths After 2001")
+first_stage_2
+ggsave("firststage_2.jpg", plot = first_stage_2, path = "First Draft",
+       bg = "white", width = 15, height = 10, units = "cm")
+
+
+# Turning deaths_pre_02 to treatment and control and counting how many and what districts fall in each.
+
+# First let's make treatment and control district using various methods, then let's plot them in Nepal's map to see the differences. 
+
+
+
+c <- c %>% #NA values turned to 0 deaths because NA in conflict data means there was no data for that district. 
+  mutate(
+    treatment = ifelse(forest_cover > quantile(forest_cover, 0.75, na.rm =T), 1, 0 ),
+    treatment_65 = ifelse(forest_cover > quantile(forest_cover, 0.65, na.rm =T), 1, 0),
+    treatment_d = ifelse(deaths_pre02 > quantile(deaths_pre02, 0.75, na.rm =T), 1, 0),
+    treatment_d65 = ifelse(deaths_pre02 > quantile(deaths_pre02, 0.65, na.rm =T), 1, 0)
+  )
+
+
+#Let's now draw the treatment and control district maps to see various differences. 
+districts_joined <- left_join(
+  districts, c, by = c("NAME_3" = "distname")
+)
+
+
+p3 <- 
+  ggplot(districts_joined) +
+  geom_sf(aes(fill = factor(treatment_d)), color = "white", size = 0.2) +
+  labs(
+    title = "Treatment and Control Districts",
+    subtitle = "Treatment Status determined by districts whose
+    forest cover is higher than the 65th percentile",
+    caption = "NLFS 1 (1998/99)",
+    fill = "Treatment Status"
+  )+
+  geom_sf_text(
+    data = subset(districts_joined, treatment_d == 1),
+    aes(label = district),
+    size = 2,
+    color = "white"
+  ) +
+  scale_fill_manual(
+    values = c("1" = "#ff474c", "0" = "#0077b6"),
+    labels = c("Treatment", "Control"),
+    name = "Treatment Status"
+  )
+p3
+
+
+d1 <- lm(deaths_post01_std ~ treatment_d + elevation_std+
+           forest_cover_std+ poverty_rate_std , c); summary(d1)
+
+d2 <- lm(deaths_post01_std ~ treatment_d65 + 
+          elevation_std+ forest_cover_std+ poverty_rate_std , c); summary(d2)
+
+stargazer(d1, d2, type = "latex", star.cutoffs = NA,
+          omit = c("elevation_std", "forest_cover_std","poverty_rate_std"),
+          keep.stat = c("n", "rsq","adj.rsq"),
+          covariate.labels = c("Deaths Before 2002 > p75 (1/0)",
+                               "Deaths Before 2002> p65 (1/0)"),
+          dep.var.labels = c("Deaths After 2001(std)"),
+          out = "First Draft/first_stage_reg_2.tex",
+          notes = c("(std) represents standardized variables", 
+                    "The controls for both regressions are : Max Elevation(std)",
+                    "Forest Cover (Std) and Poverty Rate(Std) as per the DAG"),
+          title = "Regression: Deaths After 2001(std) on Deaths before 2002 Dummy ",
+          notes.append =F,
+          notes.align = "l")
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Daggit Model Code for First Stage Forest Cover.
+
+```{r}
+first_stage <- dagitty('dag {
+"Conflict Deaths per 10000" [outcome,pos="-0.407,-0.829"]
+"Conflict Incidences" [outcome,pos="-0.458,-1.172"]
+"Forest Cover" [exposure,pos="-1.316,-0.775"]
+"Population in 1991" [pos="-0.850,-0.523"]
+"Poverty Rate" [pos="-1.159,-1.130"]
+"Socio economic Inequality" [pos="-0.841,-1.589"]
+Elevation [pos="-1.583,-1.124"]
+"Conflict Incidences" -> "Conflict Deaths per 10000"
+"Forest Cover" -> "Conflict Deaths per 10000"
+"Forest Cover" -> "Conflict Incidences"
+"Forest Cover" -> "Population in 1991"
+"Forest Cover" -> "Poverty Rate"
+"Population in 1991" -> "Conflict Deaths per 10000"
+"Poverty Rate" -> "Conflict Deaths per 10000"
+"Poverty Rate" -> "Conflict Incidences"
+"Socio economic Inequality" -> "Conflict Incidences"
+"Socio economic Inequality" -> "Poverty Rate"
+Elevation -> "Forest Cover"
+Elevation -> "Population in 1991"
+Elevation -> "Poverty Rate"
+}')
+
+```
+
+
+DAG for first stage where by treatment and control will be determined by districts afflicted with conflict before 2001 and districts that were not.
+
+```{r}
+dag {
+"Deaths post 01" [outcome,pos="0.987,0.287"]
+"Deaths pre 02" [exposure,pos="-1.606,0.240"]
+"Elevation Max" [pos="-1.578,-0.779"]
+"Forest Cover" [pos="-0.652,-1.106"]
+"Poverty Rate 95" [pos="0.238,-1.106"]
+"Deaths pre 02" -> "Deaths post 01"
+"Elevation Max" -> "Deaths post 01"
+"Elevation Max" -> "Deaths pre 02"
+"Elevation Max" -> "Forest Cover"
+"Elevation Max" -> "Poverty Rate 95"
+"Forest Cover" -> "Deaths post 01"
+"Forest Cover" -> "Deaths pre 02"
+"Poverty Rate 95" -> "Deaths post 01"
+"Poverty Rate 95" -> "Deaths pre 02"
+}
+
+```
+ 
+
+
+```{r}
+# are grouped means different from ungrouped ones: test.
+n <- 100
+d <- tibble(
+  data = rbinom(n, 1, prob = 0.7),
+  districts = sample(c(1,2,3,4), size = n, replace = T,
+                     prob = c(.2, .3, .4, .1)),
+  treatment = ifelse(districts %in% c(3,4), 1, 0)
+)
+
+d %>% group_by(treatment) %>% 
+  summarize(mean(data))
+
+
+d %>% group_by(districts) %>% 
+  summarize(district_mean = mean(data)) %>% 
+  mutate(treatment = ifelse(districts %in% c(3, 4), 1, 0)) %>% 
+  group_by(treatment) %>% 
+  summarize(mean(district_mean))
+```
+
+This shows that averaging by district and then averaging by treatment produces entirely different results than averaging by treatment only. The only way to get things correct is to get weighted means

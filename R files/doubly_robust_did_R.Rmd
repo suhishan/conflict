@@ -1,0 +1,61 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+library(DRDID)
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+# install.packages("remotes")
+remotes::install_github("pedrohcgs/DRDID")
+
+```
+
+Let's see how we use this.
+
+```{r}
+
+View(sim_rc)
+
+drdid(yname = "y", tname = "post", idname = "id",
+      dname = "d", 
+      xformla = ~ x1 + x2 + x3 + x4,
+      data = sim_rc, panel = FALSE, estMethod = "imp")
+
+glimpse(sim_rc)
+
+drdid(yname = "usually_emp", tname = "post", idname = "id",
+      dname = "treatment_crude",
+      xformla = ~  age + brahmin_chhetri + hindu,
+      data = c_merged, panel = FALSE, estMethod = "imp")
+
+
+N <- 1000
+c_fake <- tibble(
+  usually_emp = rbinom(N, 1, 0.7),
+  post = rbinom(N, 1, 0.5),
+  id = 1:N,
+  treatment_crude = rbinom(N, 1, 0.6),
+  age = rnorm(N, mean = 34, sd = 10),
+  years_of_edu = rlnorm(N, 1, 0.5),
+  brahmin_chhetri = rbinom(N, 1, 0.4),
+  hindu = rbinom(N, 1, 0.7)
+)
+
+
+
+
+
+
+```
+
+
