@@ -1,0 +1,325 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/R files/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+library(ddecompose)
+library(DRDID)
+library(xtable)
+library(purrr)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+
+#Load Datasets.
+
+```{r}
+nlfs <- read_dta("appended_nlfs.dta") # Only people aged 10 and above. 
+nlfs <- nlfs %>% 
+  mutate(post = ifelse(nlfs_year == 2008, 1, 0))
+c <- read_dta("final_conflict.dta")
+
+# Renaming and mutating most of the variables that I will need.
+
+
+#select only the relevant variables. 
+c <- c %>% select(
+  distname, elevation_max,norm_forest, pov_rate, district_abbrev, 
+  best_est, 30:51, incidents
+)
+
+c <- c %>% mutate(
+    forest_cover = round(norm_forest*100, 2),
+    poverty_rate = round(pov_rate* 100, 2), #note: Dolpa, Mustang and          Rasuwa don't have poverty rate estimates.
+    # Manang and Muustang (NA no conflict deaths) turned to 0 
+    conflict_deaths = ifelse(is.na(best_est),
+                             0,
+                             best_est)
+    )
+```
+
+
+Let's use Forest Cover as treatment and control i.e. if a district's forest cover is greater than the 75th percentile, it goes into treatment and otherwise it goes into control. 
+
+
+```{r}
+c <- c %>% mutate(
+  treatment_f = ifelse(forest_cover  > quantile(forest_cover, 0.75),
+                       1, 0),
+  treatment_crude = 
+    ifelse(conflict_deaths > quantile(conflict_deaths, 0.75), 
+                           1, 0)
+)
+
+# Merge with the nlfs data.
+c_merged <- left_join(nlfs, c, by = c("district_abbrev"))
+
+c_merged <- c_merged <- c_merged %>% mutate(
+  id = as.numeric(1:n()),
+  post = as.double(ifelse(nlfs_year == 2008, 1, 0))
+)
+
+```
+
+Now calculating the normalized difference of some observable characteristics that may have impacted untreated potential outcomes trend. 
+
+```{r}
+#function to calculate normalized difference
+norm_difference <- function(t, x) {
+  mean_t <-  mean(x[t == 1], na.rm = T)
+  mean_c <-  mean(x[t == 0], na.rm = T)
+  sd_t <-  sd(x[t == 1],na.rm =T)
+  sd_c <- sd(x[t==0],na.rm = T )
+  norm_diff = (mean_t - mean_c) / sqrt(0.5 * (sd_t^2 * sd_c^2))
+  return (round(norm_diff, digits = 4))
+}
+
+c_merged_98 <- c_merged %>% filter(nlfs_year == 1998)
+
+
+table_norm <- c_merged_98 %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_f, hhsize,
+         ever_school) %>% 
+  summarize(across(
+    .cols = -treatment_f,
+    .fns = list(
+      norm_diff = ~norm_difference(treatment_f, .x),
+      mean_t  = ~ mean(.x[treatment_f == 1], na.rm = T),
+      mean_c = ~mean(.x[treatment_f == 0], na.rm = T)),
+    .names = "{fn}_{.col}"
+  )) %>% 
+ pivot_longer(
+    cols = everything(),
+    names_to = "stat_var", values_to = "value"
+  ) %>% 
+  extract(stat_var, into = c("stat", "variable"),
+          regex = "(norm_diff|mean_t|mean_c)_(.+)") %>% 
+  pivot_wider(
+    names_from = stat, values_from = value
+  )
+table_norm
+print(xtable(table_norm), file = "../First Draft/forest_table_norm.tex",
+      include.rownames = F)
+
+```
+
+
+Now for the covariate differences:
+
+```{r}
+d1 <- c_merged %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_f, hhsize,post,
+         ever_school) %>% 
+  group_by(treatment_f) %>% 
+  summarize(
+    across(
+      .cols = -post,
+      .fns = list(
+        delta = ~ mean(.x[post == 1], na.rm = T) - mean(.x[post == 0], 
+                                                        na.rm = T)),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop") %>% 
+    pivot_longer(cols = -treatment_f, names_to = "variables",
+                 values_to = "delta") %>% 
+  pivot_wider(names_from = treatment_f, values_from = delta,
+              names_prefix = "delta_")
+
+
+```
+
+Now for normalized differences:
+
+```{r}
+#This function is to calculate normalized difference in delta_X, so calculate mean difference in post/pre for both treatment and control, and also calculate the sd of the differences. 
+
+norm_diff_delta <- function(t, post, x) {
+  mean_delta_c = mean(x[t==0 & post ==1 ], na.rm =T) 
+                  - mean(x[t == 0 & post == 0], na.rm = T)
+  mean_delta_t = mean(x[t==1 & post ==1 ], na.rm = T) 
+                  - mean(x[t == 1 & post == 0], na.rm = T)
+  
+  sd_delta_c = sd(x[t==0 & post ==1 ], na.rm = T) 
+                  - sd(x[t == 0 & post == 0], na.rm = T)
+  sd_delta_t = sd(x[t==1 & post ==1 ], na.rm = T) 
+                  - sd(x[t == 1 & post == 0], na.rm = T)
+  
+  norm_diff = (mean_delta_t - mean_delta_c)/
+    sqrt(0.5 * (sd_delta_t^2 * sd_delta_c^2))
+  
+  return (round(norm_diff, 4))
+}
+
+d2 <- c_merged %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_f, hhsize,post,
+         ever_school) %>% 
+  summarize(
+    across(
+      .cols = -c(treatment_f, post),
+      .fns = list(
+        norm_diff_delta = ~ norm_diff_delta(treatment_f, post, .x)
+      ),
+      .names = "{.col}"
+    )
+  ) %>% pivot_longer(everything())
+
+table_norm_delta <- bind_cols(d2, d1) %>% 
+  select(-variables) %>% 
+  rename(`2008 - 1998 Covariate Differences` = name, 
+         `Norm Diff` = value,
+         Control = delta_0,
+         Treatment = delta_1)
+print(xtable(table_norm_delta), 
+      file = "../First Draft/forest_table_norm_delta.tex",
+      include.rownames = F)
+
+```
+
+Let's graph the propensity scores a
+
+# Propensity Score Model. (for Transparency)
+
+Here, we use the pre-period 1998 data to construct a logit model where treatment status is regressed on covariates that may have influenced treatment assignment i.e. Regress treatment status on age, years of education, brahmin_chhetri and hindu for 2020.
+
+
+```{r}
+c_merged_98 <- c_merged_98 %>% filter(!is.na(years_of_edu_all) & !is.na(poverty_rate))
+
+ps <- glm(treatment_f ~ age + ever_school + hindu + brahmin_chhetri + poverty_rate + hhsize, data = c_merged_98, family = binomial(link = "logit") )
+summary(ps)
+
+
+c_merged_98$pscore <- predict(ps, type = "response")
+
+c_merged_98 %>% 
+  ggplot(aes(x = pscore, fill = factor(treatment_f)))+
+  geom_density(alpha = 0.5)
+
+```
+
+
+Let's do the drDiD
+
+```{r}
+ipwdid(yname = "usually_emp", tname = "post", idname = "id",
+      dname = "treatment_crude",
+      data = c_merged, panel = FALSE, boot = F, nboot = 199)
+
+
+# Which districts overlap and which don't
+
+
+c_merged %>% group_by(post,treatment_crude) %>% 
+  summarize(mean(usually_emp, na.rm = T))
+
+
+
+
+
+```
+
+Let's try and do every possible treatment group assignment and seet the distribution of values. 
+
+So, I've got two different signs for my difference in difference values, when ideally it should've been at least the same sign. I want to now randomize the treatment among districts and see the values of many difference DiDs that arise from it. 
+
+```{r}
+#Let's first see how to calculate simple DiD.
+
+c_merged %>% 
+  group_by(nlfs_year) %>% 
+  summarize(diff = mean(usually_emp[treatment_f == 1]) - 
+              mean(usually_emp[treatment_f == 0])) %>% 
+  summarize(.[2,2] - .[1,2]) %>% 
+  pull()
+  
+#Let's make a function of this.
+
+simple_did <- function(d){
+  did_estimate <- d %>% 
+    group_by(post) %>% 
+    summarize(diff = mean(usually_emp[t == 1]) - 
+                mean(usually_emp[t == 0])) %>% 
+    summarize(.[2,2] - .[1,2]) %>% 
+    pull()
+  
+  return(round(did_estimate, 5))
+}
+
+
+```
+
+
+Let's now try to compute:
+
+```{r}
+n_sim <- 1e4 # no. of simulations
+
+district_abbrev <- unique(c$district_abbrev)
+
+# A list of n_sim district and treatment assignment. 
+assignments <- map(1:n_sim, ~{
+  tibble(district_abbrev = district_abbrev,
+         t = rbinom(length(district_abbrev), 1, 0.3))
+})
+
+
+compute_did <- function(treatment_assignment) {
+  d <- nlfs %>% 
+    left_join(treatment_assignment,
+              by = c("district_abbrev"))
+  return (simple_did(d))
+}
+
+did_estimates <- map_dbl(assignments, compute_did)
+
+
+```
+
+Plotting
+```{r}
+hist <- tibble(did_estimates = did_estimates) %>% 
+ggplot(aes(x = did_estimates))+
+  geom_histogram(color = "black", fill = "skyblue",
+                 bins = 30)+
+  geom_vline(xintercept = c(-0.052, 0.026), linetype = 2,
+             color = c("red", "black"))+
+  labs(x = "Simple DiD Estimate",
+       title = "A histogram of 10000 simulated treatment assignments",
+       subtitle = "Treatment assignment binomially with p = 0.3")
+
+density <- tibble(did_estimates = did_estimates) %>% 
+  ggplot(aes(x = did_estimates))+
+  geom_density(alpha = 5/10, fill = "skyblue")+
+  geom_vline(xintercept = c(-0.052, 0.026), linetype = 2,
+             color = c("red", "black"))+
+   annotate("text", label = "Crude Estimate", x = 0.05 , y = 10)+
+    annotate("text", label = "Forest Cover \n as treatment", x = -0.07 , y = 10)+
+  labs(x = "Simple DiD Estimate",
+       title = "Density plot  of 10000 simulated treatment assignments",
+       subtitle = "Treatment assignment binomially with p = 0.3")
+
+ggsave("simulation_histogram.jpg", plot = hist, height = 20, width = 30, units = "cm",  bg = "white", path = "../First Draft")
+
+ggsave("simulation_density.jpg", plot = density, height = 15, width = 30, units = "cm",  bg = "white", path = "../First Draft")
+
+
+```
+
+
