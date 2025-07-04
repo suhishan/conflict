@@ -98,11 +98,30 @@ Wage job, business operated, Agriculture, Milling and other food processing, Han
 
 *Work Hours and Non Work Hours*
 gen wage_hours = q16a
+replace wage_hours = 0 if wage_hours == .
+replace wage_hours = 84 if wage_hours > 84
+
 egen selfemp_hours = rowtotal(q16b-q16i)
+gen selfemp_hours_84 = (selfemp_hours>84) // To keep track of which values were turned into 84 hours from >84 hours. 
+replace selfemp_hours = 84 if selfemp_hours > 84
+
+egen selfemp_hours_outside = rowtotal(q16b-q16f)
+gen selfemp_hours_outside_84 = (selfemp_hours_outside > 84)
+replace selfemp_hours_outside = 84 if selfemp_hours_outside>84
 
 egen work_hours = rowtotal(q16a-q16i) // work hours/q16 is 0 if all columns are missing.
 gen work_morethan_84 = (work_hours>84)
 replace work_hours = 84 if work_hours >84
+
+egen work_hours_outside = rowtotal(q16a-q16f)
+gen work_hours_outside_84 = (work_hours_outside > 84)
+replace work_hours_outside = 84 if work_hours_outside > 84
+
+egen work_hours_inside = rowtotal(q16g-q16i)
+gen work_hours_inside_84 = (work_hours_inside > 84)
+replace work_hours_inside = 84 if work_hours_inside > 84
+
+
 egen nonwork_hours = rowtotal(q17a-q17g) // q17 (total non work hours) has a bunch of 999 values for 0 so use `nonwork_hours`
 
 egen total_hours  = rowtotal(work_hours nonwork_hours)
@@ -116,6 +135,12 @@ count if total_hours > 98
  
  * Currently Active (currently employed/unemployed) and currently inactive *
  gen currently_emp = (work_hours !=0  | (q18 == 1 & (q19 == 1  | q20 == 1)))
+ gen currently_emp_out = (work_hours_outside !=0  | (q18 == 1 & (q19 == 1  | q20 == 1)))
+ 
+ gen currently_selfemp_out = (selfemp_hours_outside !=0 | (q18 == 1 & (q19 == 1  | q20 == 1)))
+ gen currently_emp_wage = (wage_hours !=0 | (q18 == 1 & (q19 == 1  | q20 == 1)))
+
+ 
  gen currently_unemp = (q46 == 1 |  (q46 == 2 & q51!=5))
  gen currently_underemp = (q16 < 40 & inrange(q37, 1, 6))
  
@@ -171,18 +196,20 @@ gen ever_school = (q10  == 1 | q11 == 1)
 gen years_of_edu_all = years_of_edu
 replace years_of_edu_all = 0 if ever_school == 0
 
+
+
 /*-------------------------------------------*
 Some Descriptive Statistics
 *---------------------------------------------*/
-tabstat currently_active, by(district) stat(mean)
+*tabstat currently_active, by(district) stat(mean)
 
 
 * Keep all the necessary variables from NLFS individual_merged.dta, and save it in another file for appending with NLFS 2*
 
 #delimit ;
 keep nlfs_year sex age hhsize urbrur marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
-wage_hours selfemp_hours work_hours nonwork_hours total_hours 
-currently_emp currently_unemp currently_underemp
+wage_hours selfemp_hours selfemp_hours_outside work_hours work_hours_outside nonwork_hours total_hours 
+currently_emp currently_emp_out currently_selfemp_out currently_emp_wage currently_unemp currently_underemp
 currently_active currently_inactive
 usually_active usually_inactive 
 can_read can_write current_attend ever_attend years_of_edu ever_school years_of_edu_all
@@ -190,6 +217,8 @@ usually_emp usually_unemp ;
 #delimit cr
 
 save "NLFS 1\kept_individual.dta", replace
+
+
 
 
 /*------------------------------------------------------------*
@@ -259,10 +288,32 @@ gen brahmin_chhetri = (ethnicity == 1 | ethnicity == 2)
 *Work Hours (Wage employed and self-employed) and Non-work hours*
 
 egen wage_hours = rowtotal(q36a q36b), missing // keeping missing if all values in varlist are missing. 
+replace wage_hours = 0 if wage_hours == .
+replace wage_hours = 84 if wage_hours > 84
+
+
 egen selfemp_hours = rowtotal(q36c-q36j), missing //I want to keep missing values if all values in varlist are missing
+gen selfemp_hours_84 = (selfemp_hours>84) // To keep track of which values were turned into 84 hours from >84 hours. 
+replace selfemp_hours = 84 if selfemp_hours > 84
+
+
+egen selfemp_hours_outside = rowtotal(q36c-q36g), missing //I want to keep missing values if all values in varlist are missing
+gen selfemp_hours_outside_84 = (selfemp_hours_outside>84) // To keep track of which values were turned into 84 hours from >84 hours. 
+replace selfemp_hours_outside = 84 if selfemp_hours_outside > 84
+
+
 egen work_hours = rowtotal(wage_hours selfemp_hours), missing
 gen work_morethan_84 = (work_hours>84)
 replace work_hours = 84 if work_hours >84
+
+egen work_hours_outside = rowtotal(q36a-q36g), missing
+gen work_hours_outside_84 = (work_hours_outside > 84)
+replace work_hours_outside = 84 if work_hours_outside > 84
+
+egen work_hours_inside = rowtotal(q36h-q36j)
+gen work_hours_inside_84 = (work_hours_inside > 84)
+replace work_hours_inside = 84 if work_hours_inside > 84
+
 
 *NOTE: missing values, i.e. suppose people who didn't work in agricultural wage, are coded as 0.*
 
@@ -274,6 +325,11 @@ replace total_hours = 110 if total_hours > 110
 
 * Currently Employed, Currently Unemployed and Curretly Underemployed Stats*
 gen currently_emp = (work_hours >0  | (q38 == 1 & (q39 == 1  | q40 == 1)))
+
+gen currently_emp_out = (work_hours_outside >0  | (q38 == 1 & (q39 == 1  | q40 == 1)))
+ gen currently_selfemp_out = (selfemp_hours_outside >0  | (q38 == 1 & (q39 == 1  | q40 == 1)))
+ gen currently_emp_wage = (wage_hours >0  | (q38 == 1 & (q39 == 1  | q40 == 1)))
+
 gen currently_unemp = (q77 == 1 | (q77 == 2 & q82 != 5))
 gen currently_underemp = (work_hours < 40 & inrange(q68, 1, 6))
 
@@ -348,8 +404,8 @@ replace district_abbrev = "dadh" if district_abbrev == "dade"
 
 #delimit ;
 keep nlfs_year sex age hhsize urbrur marital_status religion_recode hindu ethnicity brahmin_chhetri district district_abbrev 
-wage_hours selfemp_hours work_hours nonwork_hours total_hours 
-currently_emp currently_unemp currently_underemp
+wage_hours selfemp_hours selfemp_hours_outside work_hours work_hours_outside nonwork_hours total_hours 
+currently_emp currently_emp_out currently_selfemp_out currently_emp_wage currently_unemp currently_underemp
 currently_active currently_inactive
 usually_active usually_inactive 
 can_read can_write current_attend ever_attend years_of_edu ever_school years_of_edu_all
