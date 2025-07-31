@@ -1,0 +1,619 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+The idea now and here is to limit the sample size to only those districts that had 0 deaths by 1998. And then, among them, classify as treatment those districts with higher than average deaths by the end of 2008. 
+
+[] Change estimates to only include people aged 15-59 inclusive, also the working age population.
+
+```{r}
+setwd("/home/suhishan/Documents/Final Sem Research/Conflict/R files/")
+library(haven)
+library(tidyverse)
+library(stargazer)
+library(patchwork)
+library(dagitty)
+library(sf)
+library(ddecompose)
+library(DRDID)
+library(xtable)
+library(purrr)
+library(modelsummary)
+
+theme_set(theme_minimal() +
+            theme(panel.grid = element_blank()))
+
+```
+
+
+#Load Datasets.
+
+```{r}
+nlfs <- read_dta("appended_nlfs.dta") # Only people aged 10 and above. 
+nlfs <- nlfs %>% 
+  mutate(post = ifelse(nlfs_year == 2008, 1, 0)) # No Manang and Dolpa in NLFS data. 
+
+
+c <- read_dta("final_conflict.dta")
+
+# Renaming and mutating most of the variables that I will need.
+
+# Select only the relevant variables. 
+c <- c %>% select(
+  distname, elevation_max,norm_forest, pov_rate, district_abbrev,popn_2001,
+  best_est, 30:51, incidents
+)
+
+c <- c %>% mutate(
+    forest_cover = round(norm_forest * 100, 2),
+    poverty_rate = round(pov_rate * 100, 2),
+    # note: Dolpa, Mustang and Rasuwa don't have poverty rate estimates.
+    
+    # Manang and Mustang (NA no conflict deaths) turned to 0 
+    conflict_deaths = ifelse(is.na(best_est),
+                             0, best_est),
+    cd_per_10000 = (conflict_deaths / popn_2001) * 1e4,
+    deaths_until_98 = deaths_96 + deaths_97 + deaths_98,
+    deaths_until_97 = deaths_96 + deaths_97
+    ) %>% 
+  mutate(
+    deaths_until_98 = ifelse(is.na(deaths_until_98), 0, deaths_until_98)
+  )
+
+```
+
+
+
+#Let's now restrict our sample to only those districts which experienced no casualties by the end of 1998 A.D.
+
+```{r}
+c_small <- c %>% filter(deaths_until_98 == 0)
+
+# Conflict deaths higher than 75th percentile considered treatment.
+c_small <- c_small %>% mutate(
+  treatment_s = ifelse(cd_per_10000 > 
+                         quantile(cd_per_10000, prob = 0.75), 1, 0)
+)
+
+# To look at E[D = d] and E[D = d_l]
+c_small %>% group_by(treatment_s) %>% 
+  summarize(mean_deaths = mean(cd_per_10000))
+
+#summary for conflict deaths and conflict deaths per 10000 for whole sample
+x <- c_small %>% select(conflict_deaths, cd_per_10000)
+datasummary_skim(x,output = "html", fmt = 2)
+
+```
+
+
+#First stage lm regression to see how many conflict deaths higher do treatment districts face than non conflict ones.
+
+
+```{r}
+c_small <- c_small %>% mutate(
+    conflict_deaths_std = rethinking::standardize(conflict_deaths),
+    cd_per_10000_std = rethinking::standardize(cd_per_10000)
+  )
+
+m3 <- lm(cd_per_10000_std  ~ treatment_s, data = c_small); summary(m3)
+
+# 1.8 standard deviations higher.
+
+# Display/Output the results in a tex file.
+stargazer(m3,  type = "latex", star.cutoffs = NA,
+          keep.stat = c("n", "rsq","adj.rsq"),
+          covariate.labels = c("Treatment (1/0)"),
+          dep.var.labels = c("Conflict Deaths per 10,000 population (std)"),
+          notes = "(std) represents standardized variables",
+          out = "../Second Draft/small_sample_reg_41.tex",
+          title = "Conflict Deaths per 10,000 population regressed on Treatment Status",
+          notes.append =F)
+
+```
+
+
+Let's merge the dataset.
+
+```{r}
+c_merged <- left_join(c_small, nlfs, by = c("district_abbrev"))
+
+
+c_merged <-  c_merged %>% mutate(
+  id = as.numeric(1:n()),
+  post = ifelse(nlfs_year == 2008, 1, 0),
+  years_of_edu_all = ifelse(is.na(years_of_edu_all), 0, years_of_edu_all),
+  work_hours_outside_std = rethinking::standardize(work_hours_outside),
+  selfemp_hours_outside_std = rethinking::standardize(selfemp_hours_outside)
+) %>% filter(!is.na(post) & age >=15  & age <= 59) # Filtering only for working age population.
+
+c_merged_98 <- c_merged %>% filter(nlfs_year == 1998)
+
+```
+
+
+## Summary Statistics:
+
+```{r}
+a <- c_merged %>% select(usually_emp, currently_emp_out, 
+                             currently_selfemp_out,work_hours_outside,
+                             selfemp_hours_outside, conflict_deaths, 
+                             cd_per_10000, age, ever_attend, years_of_edu, 
+                             years_of_edu_all, hindu, brahmin_chhetri, 
+                             sex, marital_status, hhsize, urbrur)
+
+datasummary_skim(a ,output = "html", fmt = 2)
+```
+
+
+# Covariate Balance table:
+
+
+```{r}
+#function to calculate normalized difference
+norm_difference <- function(t, x) {
+  mean_t <-  mean(x[t == 1], na.rm = T)
+  mean_c <-  mean(x[t == 0], na.rm = T)
+  sd_t <-  sd(x[t == 1],na.rm =T)
+  sd_c <- sd(x[t==0],na.rm = T )
+  norm_diff = (mean_t - mean_c) / sqrt(0.5 * (sd_t^2 + sd_c^2))
+  return (round(norm_diff, digits = 4))
+}
+
+
+table_norm <- c_merged_98 %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_s, hhsize, urbrur,
+         ever_school) %>% 
+  summarize(across(
+    .cols = -treatment_s,
+    .fns = list(
+      norm_diff = ~norm_difference(treatment_s, .x),
+      mean_t  = ~ mean(.x[treatment_s == 1], na.rm = T),
+      mean_c = ~mean(.x[treatment_s == 0], na.rm = T)),
+    .names = "{fn}_{.col}"
+  )) %>% 
+ pivot_longer(
+    cols = everything(),
+    names_to = "stat_var", values_to = "value"
+  ) %>% 
+  extract(stat_var, into = c("stat", "variable"),
+          regex = "(norm_diff|mean_t|mean_c)_(.+)") %>% 
+  pivot_wider(
+    names_from = stat, values_from = value
+  )
+
+table_norm
+
+```
+
+
+# Outputting the covariate difference Table:
+
+```{r}
+pretty_names <- c(
+  age = "Age",
+  years_of_edu_all = "Years of Education (All)",
+  years_of_edu = "Years of Education (If attended school)",
+  hindu = "Hindu (1/0)",
+  brahmin_chhetri = "Brahmin/Chhetri(1/0)",
+  sex = "Male",
+  marital_status = "Married",
+  hhsize = "Household Size",
+  urbrur = "Urban",
+  ever_school = "Ever Attended School"
+)
+
+table_norm_out <- table_norm %>% 
+  mutate(
+    variable = pretty_names[variable]
+  ) %>% 
+  rename(
+    `Norm. Diff` = norm_diff,
+    `Treated Mean` = mean_t,
+    `Control Mean` = mean_c,
+  ) %>% mutate(
+    across(c(`Norm. Diff`, `Treated Mean`, `Control Mean`), ~ round(.x, 3))
+  ) %>% 
+  column_to_rownames("variable")
+
+print(xtable(table_norm_out, caption = "Covariate Balance Statistics"), 
+      type = "latex",
+      file = "../Second Draft/covariate_balance_41.tex",
+      booktabs = T,
+      )
+
+table_norm_out
+
+```
+
+
+# Change in means (delta mean of covaraites)
+
+```{r}
+d1 <- c_merged %>% 
+  select(age, years_of_edu_all, years_of_edu, hindu,
+         brahmin_chhetri, sex, marital_status,
+         treatment_s, hhsize,post, urbrur,
+         ever_school) %>% 
+  group_by(treatment_s) %>% 
+  summarize(
+    across(
+      .cols = -post,
+      .fns = list(
+        delta = ~ mean(.x[post == 1], na.rm = T) - mean(.x[post == 0], 
+                                                        na.rm = T)),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop") %>% 
+    pivot_longer(cols = -treatment_s, names_to = "variables",
+                 values_to = "delta") %>% 
+  pivot_wider(names_from = treatment_s, values_from = delta,
+              names_prefix = "delta_")
+
+d1
+
+```
+
+##[ ] Output the treatment/control trends.
+
+```{r}
+pretty_names_delta <- c(
+  age_delta = "Age",
+  years_of_edu_all_delta = "Years of Education (All)",
+  years_of_edu_delta = "Years of Education (If attended school)",
+  hindu_delta = "Hindu (1/0)",
+  brahmin_chhetri_delta = "Brahmin/Chhetri(1/0)",
+  sex_delta = "Male",
+  marital_status_delta = "Married",
+  hhsize_delta = "Household Size",
+  urbrur_delta = "Urban",
+  ever_school_delta = "Ever Attended School"
+)
+
+d1_out <- d1 %>% 
+  mutate(variables = pretty_names_delta[variables]) %>% 
+  rename(
+    `Control trend` = delta_0,
+    `Treatment trend` = delta_1,
+  ) %>% column_to_rownames("variables") %>% 
+  mutate(
+    across(c(`Control trend`,`Treatment trend`), ~ round(.x, 3) )
+  )
+
+
+print(xtable(d1_out, caption = "Covariate Balance Statistics for trends/differences (2008 - 1998)"), 
+      type = "latex",
+      file = "../Second Draft/covariate_balance_trends_41.tex",
+      booktabs = T,
+      )
+d1_out
+
+```
+
+
+First let's graph the propensity scores for transparency:
+
+Here, we use the pre-period 1998 data to construct a logit model where treatment status is regressed on covariates that may have influenced treatment assignment i.e. Regress treatment status on age, years of education, brahmin_chhetri and hindu for 2020.
+
+Output propensity score of being assigned treatment into a tex file n
+```{r}
+
+library(sandwich)
+library(lmtest)
+
+c_merged_98 <- c_merged_98 %>% filter(!is.na(years_of_edu_all) &
+                                        !is.na(poverty_rate))
+
+# Mustang doesn't have poverty_rate estimates so it is selected out.
+
+ps <- glm(treatment_s ~  age + hindu + brahmin_chhetri + 
+          sex + marital_status + urbrur,
+          data = c_merged_98, family = binomial(link = "logit") )
+
+summary(ps)
+
+
+cl_vcov <- vcovCL(ps, cluster = c_merged_98$psu, type = "HC1")
+cl_test <- coeftest(ps, vcov. = cl_vcov); cl_test
+
+
+coefs <- cl_test[, 1]
+ses <- cl_test[, 2] # clustered standard errors. 
+```
+
+## Propensity Scores Regression Output:
+
+```{r}
+stargazer(ps,
+          se = list(ses),
+          type = "latex",
+          out = "../Second Draft/propensity_score_reg_41.tex",
+          title = "Propensity Score Regression on observed covariates (1998 NLFS)",
+          dep.var.labels = "Treatment (high-conflict)",
+          covariate.labels = c("Age", "Hindu", "Brahmin/Chhetri","Sex", "Marital Status","Urban"),
+          digits = 3,
+          star.cutoffs = NA,
+          
+          notes = "Standard errors are psu-clustered",
+          notes.append = F)
+```
+
+
+Let's then plot the propensity scores:
+
+```{r}
+
+c_merged_98$pscore <- predict(ps, type = "response")
+
+ps_small_sample <- c_merged_98 %>% 
+  ggplot(aes(x = pscore, color = factor(treatment_s)))+
+  geom_histogram(aes(y = after_stat(density)),alpha = 0.5,
+                 position = "identity",
+                 fill = "white",
+                 bins = 40,
+                 linewidth = 1.35)+
+  scale_color_manual(values = c("blue","red"),
+                     name = "Treatement",
+                     labels = c("Low Conflict", "High Conflict")) +
+  labs(
+    x= "Propensity Score",
+    y = "Density"
+  )
+
+ps_small_sample
+```
+
+# Output the propensity Scores Picture:
+```{r}
+ggsave("../Second Draft/ps_sample_sample_41.jpg", plot = ps_small_sample,
+       width = 25, height = 15, units = c("cm"), bg = "white")
+```
+
+To see whether the decreased 3 or 4 hours in employment is economically significant, we do need to look at the means of work hours.
+
+```{r}
+c_merged %>% 
+  group_by(post, treatment_s) %>% 
+  summarize(mean_hours = mean(work_hours_outside))
+
+#OVerall mean
+c_merged %>% 
+   summarize(mean_hours = mean(work_hours_outside),
+             mean_selfemp_hours = mean(selfemp_hours_outside))
+```
+
+
+## A function that takes variables and dataset as input and outputs DRDID estimates. 
+
+```{r}
+dr <- function(v, d){
+  a <- drdid(yname = v, tname = "post", idname = "id",
+             dname = "treatment_s",
+             xformla = ~  age + hindu + brahmin_chhetri +  marital_status + urbrur + sex,
+             data = d, panel = FALSE, boot = F, nboot = 199)
+  
+  out =  round(data.frame(a[1:4]), 3)
+  
+  return (out)
+  
+}
+
+vars <- c("usually_emp", "currently_emp_out",
+          "currently_selfemp_out","work_hours_outside", "work_hours_outside_std"
+          ,"selfemp_hours_outside","selfemp_hours_outside_std")
+
+output_did <- function(vars, d) {
+  b <- sapply(vars, dr, d)
+  return (data.frame(t(b)))
+}
+
+model_1 <- output_did(vars, c_merged) %>% 
+  rownames_to_column(var = "variables")
+
+```
+
+
+## Output the doubly Robust table in tex format.
+
+```{r}
+outcome_var_names <- c(
+  usually_emp = "Usually Employed",
+  currently_emp_out = "Currently Employed",
+  currently_selfemp_out = "Currently Self-employed",
+  work_hours_outside = "Work Hours",
+  work_hours_outside_std = "Work Hours (std)",
+  selfemp_hours_outside = "Self Employment Hours",
+  selfemp_hours_outside_std = "Self Employment Hours (std)"
+)
+
+model_1_out <- model_1 %>% 
+  mutate(variables = outcome_var_names[variables]) %>% 
+  column_to_rownames("variables")
+
+
+
+print(xtable(model_1_out, caption = "Doubly Robust DiD estimates of ATT"), 
+      type = "latex",
+      file = "../Second Draft/model_1_41.tex",
+      booktabs = T,
+      )
+```
+
+#Misspecification and Heterogeniety estimates.
+## For people that did not migrate.
+
+```{r}
+c_merged_p <- c_merged %>% filter(post == 0 | (post == 1 & perma_resident == 1))
+
+model_p <- output_did(vars, c_merged_p) %>% 
+  rownames_to_column(var = "variables")
+```
+
+
+```{r}
+model_p_out <- model_p %>% 
+  mutate(variables = outcome_var_names[variables]) %>% 
+  column_to_rownames("variables")
+
+print(xtable(model_p_out, caption = "Doubly Robust DiD estimates of ATT accounting for migration"), 
+      type = "latex",
+      file = "../Second Draft/model_p_41.tex",
+      booktabs = T,
+      )
+```
+
+## Urban and Rural Separate Estimates. 
+
+```{r}
+# the function to calculate drdid without location urbrur as a covariate
+dr_2 <- function(v, d){
+  a <- drdid(yname = v, tname = "post", idname = "id",
+             dname = "treatment_s",
+             xformla = ~  age + hindu + brahmin_chhetri +  marital_status + sex,
+             data = d, panel = FALSE, boot = F, nboot = 199)
+  
+  out =  round(data.frame(a[1:4]), 3)
+  
+  return (out)
+  
+}
+output_did_2 <- function(vars, d) {
+  b <- sapply(vars, dr_2, d)
+  return (data.frame(t(b)))
+}
+```
+
+
+```{r}
+c_merged_u <- c_merged %>% filter(urbrur == 1)
+c_merged_r <- c_merged %>% filter(urbrur == 0)
+
+model_u <- output_did_2(vars, c_merged_u) %>% 
+  rownames_to_column(var = "variables")
+
+model_r <- output_did_2(vars, c_merged_r) %>% 
+  rownames_to_column(var = "variables")
+
+```
+
+## Output rural and urban models. 
+
+```{r}
+model_r_out <- model_r %>% 
+  mutate(variables = outcome_var_names[variables]) %>% 
+  column_to_rownames("variables")
+
+print(xtable(model_r_out, caption = "Doubly Robust DiD estimates of ATT for the rural sample"), 
+      type = "latex",
+      file = "../Second Draft/model_r_41.tex",
+      booktabs = T,
+      )
+
+
+model_u_out <- model_u %>% 
+  mutate(variables = outcome_var_names[variables]) %>% 
+  column_to_rownames("variables")
+
+print(xtable(model_u_out, caption = "Doubly Robust DiD estimates of ATT for the urban sample"), 
+      type = "latex",
+      file = "../Second Draft/model_u_41.tex",
+      booktabs = T,
+      )
+```
+
+
+## Overall model without Kathmandu
+
+```{r}
+model_wo_k <- output_did_2(vars, c_merged_u %>% filter(district_abbrev != "kath")) %>% 
+  rownames_to_column(var = "variables")
+```
+
+
+## Misspecification : Include poverty rate as a covariate.
+
+
+```{r}
+ps_pov <- glm(treatment_s ~  age + hindu + brahmin_chhetri + 
+          sex + marital_status + urbrur + poverty_rate,
+          data = c_merged_98, family = binomial(link = "logit") )
+
+summary(ps_pov)
+
+
+cl_vcov <- vcovCL(ps_pov, cluster = c_merged_98$psu, type = "HC1")
+cl_test <- coeftest(ps_pov, vcov. = cl_vcov); cl_test
+
+
+coefs <- cl_test[, 1]
+ses <- cl_test[, 2] 
+```
+
+### Overlap after including poverty rate as a covariate:
+
+```{r}
+c_merged_98$pscore_pov <- predict(ps_pov, type = "response")
+
+ps_small_sample_pov <- c_merged_98 %>% 
+  ggplot(aes(x = pscore_pov, color = factor(treatment_s)))+
+  geom_histogram(aes(y = after_stat(density)),alpha = 0.5,
+                 position = "identity",
+                 fill = "white",
+                 bins = 40,
+                 linewidth = 1.35)+
+  scale_color_manual(values = c("blue","red"),
+                     name = "Treatement",
+                     labels = c("Low Conflict", "High Conflict")) +
+  labs(
+    x= "Propensity Score",
+    y = "Density"
+  )
+
+ps_small_sample_pov
+
+ggsave("../Second Draft/ps_sample_sample_pov_41.jpg", plot = ps_small_sample_pov,
+       width = 25, height = 15, units = c("cm"), bg = "white")
+```
+
+
+## The poverty rate DiD estimate.
+
+
+```{r}
+dr_3 <- function(v, d){
+  a <- drdid(yname = v, tname = "post", idname = "id",
+             dname = "treatment_s",
+             xformla = ~  age + hindu + brahmin_chhetri +  marital_status + sex + urbrur + poverty_rate,
+             data = d, panel = FALSE, boot = F, nboot = 199)
+  
+  out =  round(data.frame(a[1:4]), 3)
+  
+  return (out)
+  
+}
+output_did_3 <- function(vars, d) {
+  b <- sapply(vars, dr_3, d)
+  return (data.frame(t(b)))
+}
+
+```
+
+```{r}
+model_pov <- output_did_3(vars, c_merged %>% filter(!is.na(poverty_rate))) %>% 
+  rownames_to_column(var = "variables")
+
+#Output it
+
+model_pov_out <- model_pov %>% 
+  mutate(variables = outcome_var_names[variables]) %>% 
+  column_to_rownames("variables")
+
+print(xtable(model_pov_out, caption = "Doubly Robust DiD estimates of ATT (with poverty rate as covariate)"), 
+      type = "latex",
+      file = "../Second Draft/model_pov_41.tex",
+      booktabs = T,
+      )
+```
+
